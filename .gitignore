@@ -1,0 +1,78 @@
+# -----------------------------
+# Python cache and bytecode
+# -----------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# -----------------------------
+# Virtual environments
+# -----------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# -----------------------------
+# IDE and editor files
+# -----------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# -----------------------------
+# OS files
+# -----------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# Logs and experiment outputs
+# -----------------------------
+log/
+train_log/
+DeepPhotoStyle_pytorch/log/
+DeepPhotoStyle_pytorch/output_test/
+DeepPhotoStyle_pytorch/asset/gen_img/
+
+# TensorBoard event files
+events.out.tfevents.*
+
+# -----------------------------
+# Generated images and arrays
+# -----------------------------
+temp_*.png
+*_disp.jpg
+*_disp.npy
+*.npy
+*.npz
+
+# Optional generated attack outputs
+pseudo_lidar/figures/GeneratedAtks/Adv_car/
+pseudo_lidar/figures/GeneratedAtks/PointCloud/
+
+# -----------------------------
+# Dataset and large local resources
+# -----------------------------
+kitti_data/
+
+# Keep the folder structure if needed, but do not track large model weights
+models/
+
+# -----------------------------
+# Model checkpoints and weights
+# -----------------------------
+*.pt
+*.pth
+*.ckpt
+*.hdf5
+
+# -----------------------------
+# Archive and export leftovers
+# -----------------------------
+*.zip
+
+# If you want to keep a specific archive tracked later,
+# remove its pattern above and add it explicitly.
+

@@ -1,0 +1,12 @@
+STYLE_IMAGE -> UNIQUE_PAINT_MASK
+source: /home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/run2025 and /home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/run2026
+
+America.png -> BMW_PaintMask33.png, BMW_PaintMask34.png
+Australia.png -> BMW_PaintMask32.png, BMW_PaintMask34.png, BMW_PaintMask36.png, BMW_PaintMask37.png
+LP.png -> BMW_PaintMask27.png, BMW_PaintMask28.png, BMW_PaintMask29.png, BMW_PaintMask32.png
+new_LP.png -> BMW_PaintMask33.png
+shixi.png -> BMW_PaintMask32.png, BMW_PaintMask35.png
+stain.png -> BMW_PaintMask33.png
+stained_0031.png -> BMW_PaintMask32.png
+stop_dir_1.png -> BMW_PaintMask32.png
+stop_dir_2.png -> BMW_PaintMask32.png
