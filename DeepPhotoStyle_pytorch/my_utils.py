@@ -9,9 +9,11 @@ from matting import *
 import config
 import scipy.ndimage as spi
 
-kitti_object_path = "/home/hyj/data/KITTI/object/"
+# kitti_object_path = "/home/hyj/data/KITTI/object/"
+kitti_object_path = "/data/hyj/advpatch/dataset/KITTI/object/"
 project_root = "/home/hyj/code/ADV_ATTACK/"
-log_dir = "/home/hyj/data/log2026/05"
+# log_dir = "/home/hyj/data/log2026/05"
+log_dir = "/data/hyj/advpatch/MDE_Attack/log2026/"
 
 
 def load_image(path, size):
