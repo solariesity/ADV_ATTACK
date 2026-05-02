@@ -17,4 +17,4 @@ def crop_transparent(input_path, output_path):
         print("图片是全透明的")
 
 
-crop_transparent("/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/asset/src_img/content/shixi.png", "/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/asset/src_img/content/shixi_2.png")
+crop_transparent("/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/content/shixi.png", "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/content/shixi_2.png")

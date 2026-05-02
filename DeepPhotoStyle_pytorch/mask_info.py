@@ -91,8 +91,8 @@ def analyze_mask(mask_path):
 # ---------------------- 示例用法 ----------------------
 if __name__ == "__main__":
     # 替换为你的mask图片路径（如"mask.png"）
-    # mask_file = "/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/asset/src_img/car/BMW_PaintMask25.png"
-    mask_file = "/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/asset/src_img/content/LP.png"
+    # mask_file = "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/car/BMW_PaintMask25.png"
+    mask_file = "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/content/LP.png"
     # 分析mask属性
     mask_info = analyze_mask(mask_file)
 

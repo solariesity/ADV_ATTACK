@@ -69,8 +69,8 @@ def image_to_mask(input_path: str, output_path: str) -> None:
 if __name__ == "__main__":
     try:
         image_to_mask(
-            input_path="/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/asset/src_img/content/shixi.png",
-            output_path="/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/asset/src_img/content/shixi_ContentMask.png",
+            input_path="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/content/shixi.png",
+            output_path="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/content/shixi_ContentMask.png",
         )
     except Exception as e:
         print(f"处理失败: {e}")

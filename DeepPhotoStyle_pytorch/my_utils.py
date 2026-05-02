@@ -10,7 +10,7 @@ import config
 import scipy.ndimage as spi
 
 kitti_object_path = "/home/hyj/data/KITTI/object/"
-project_root = "/home/hyj/code/MDE_Attack/"
+project_root = "/home/hyj/code/ADV_ATTACK/"
 log_dir = "/home/hyj/data/log2026/05"
 
 

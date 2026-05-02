@@ -73,6 +73,6 @@ def create_mask(output_path, width=1563, height=1355, channels=1, foreground_val
 # 示例使用
 if __name__ == "__main__":
     # 使用默认值创建mask（与你的示例相同）左上右下
-    create_mask("/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/asset/src_img/car/BMW_PaintMask37.png", box=(630, 660, 1330, 980))
+    create_mask("/home/hyj/code/ADV_Attack/DeepPhotoStyle_pytorch/asset/src_img/car/BMW_PaintMask37.png", box=(630, 660, 1330, 980))
     # 自定义参数创建mask
     # create_mask(output_path="mask.png", width=1563, height=1355, channels=1, foreground_value=255, background_value=0, shape="rectangle")

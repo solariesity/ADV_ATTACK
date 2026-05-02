@@ -43,7 +43,7 @@ CLASS_LAMBDA=(0.0000000001 0.0000000001 0.0000000001 0.0000000001 0.0000000001 0
 MIDU_WEIGHT=(85 85 85 85 85 85 85 85)
 
 
-LOG_DIR="/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/log/log2026/05/log0502/color_2/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}"
+LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0502/color_2/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}"
 LOG_FILE="$LOG_DIR/color_scan_${PAINT_MASK}_${STEPS}.txt"
 
 mkdir -p "$LOG_DIR"
@@ -54,7 +54,7 @@ echo "start" >> "$LOG_FILE"
 for i in {0,1,2,3,4,5,6,7}; do
     RESULT_FILE="$LOG_DIR/${LABEL[$i]}_LR_${LEARNING_RATE[$i]}_COLOR_WEIGHT_${COLOR_WEIGHT[$i]}_MIDU_WEIGHT_${MIDU_WEIGHT[$i]}_${i}.txt"
 
-    echo "python /home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/test.py \
+    echo "python /home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/test.py \
             -s "$STYLE_IMAGE" \
             -c "$CONTENT_IMAGE" \
             -v "$VEHICLE" \
@@ -86,7 +86,7 @@ for i in {0,1,2,3,4,5,6,7}; do
             -cl "${CLASS_LAMBDA[$i]}" \
             -ml "${MIDU_WEIGHT[$i]}"" >> "$LOG_FILE"
 
-    nohup python /home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/test.py \
+    nohup python /home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/test.py \
         -s "$STYLE_IMAGE" \
         -c "$CONTENT_IMAGE" \
         -v "$VEHICLE" \

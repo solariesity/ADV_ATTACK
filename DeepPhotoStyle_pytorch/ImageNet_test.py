@@ -68,7 +68,7 @@ if __name__ == "__main__":
     model = model.to(device)  # 模型送入指定设备（CPU/GPU）
 
     # 3.2 替换为你的待识别图片路径（支持JPG/PNG/BMP等常见格式）
-    TEST_IMAGE_PATH = "/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/asset/src_img/car/BMW.png"  # 示例：如一张"金毛犬"图片（对应index=207）
+    TEST_IMAGE_PATH = "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/car/BMW.png"  # 示例：如一张"金毛犬"图片（对应index=207）
 
     # 3.3 执行预测并打印结果
     try:

@@ -84,4 +84,4 @@ if __name__ == "__main__":
     # if result:
     #     print(f"输出文件: {result}")
 
-    create_white_mask("/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/asset/src_img/content/White.png")
+    create_white_mask("/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/content/White.png")

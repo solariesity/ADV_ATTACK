@@ -128,9 +128,9 @@ if __name__ == "__main__":
     # img_path = "D:/hyj/lab/mde_attack/test/Jun12_16-35-39_mono_car_Rob_disp/adv_scene_output.png"
     # img_path = "test_output/bus.jpg"
     # img_path = "optimized_image_1.jpg"
-    # img_path = "/data/hyj/advpatch/MDE_Attack/log/logs/Jul12_00-00-12_mono_car_Rob_disp/adv_scene_output.png" #0.24
-    # img_path = "/data/hyj/advpatch/MDE_Attack/log/logs/Jul11_17-56-23_mono_car_Rob_disp/adv_scene_output.png"
-    # img_path = "/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/test_output/image.png"
+    # img_path = "/data/hyj/advpatch/ADV_ATTACK/log/logs/Jul12_00-00-12_mono_car_Rob_disp/adv_scene_output.png" #0.24
+    # img_path = "/data/hyj/advpatch/ADV_ATTACK/log/logs/Jul11_17-56-23_mono_car_Rob_disp/adv_scene_output.png"
+    # img_path = "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/test_output/image.png"
     img_path = "/home/hyj/data/log12/logs/Dec08_05-52-42_mono_car_Rob_disp/yolo_result.jpg"
 
     results = model(img_path)

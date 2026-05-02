@@ -2,7 +2,7 @@ from PIL import Image
 
 # 1. 打开原图片（请确保LP.png在当前目录下）
 try:
-    img = Image.open("/home/hyj/code/MDE_Attack/DeepPhotoStyle_pytorch/asset/src_img/content/LP.png")
+    img = Image.open("/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/content/LP.png")
 except FileNotFoundError:
     print("错误：未找到LP.png，请检查文件路径！")
     exit()
