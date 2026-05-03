@@ -75,6 +75,7 @@ if __name__ == "__main__":
     ap.add_argument("--late-start", action="store_true", help="start mask opimize from the second phase")
     ap.add_argument("--baseline", "-bl", type=str, default="proposed", choices=["baseline", "proposed"], help="Baseline or proposed method")
     ap.add_argument("--style-lambda", "-sl", default=1, type=float, help="Style transfer wrap weight")
+    ap.add_argument("--color-ratio", "-cr", default=0.0909090909, type=float, help="color ratio share for the weaker color term")
 
     args = vars(ap.parse_args())
 

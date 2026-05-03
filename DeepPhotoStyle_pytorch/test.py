@@ -76,6 +76,7 @@ if __name__ == "__main__":
     ap.add_argument("--decay-power", "-dp", default=0.9, type=float, help="power of learning rate")
     ap.add_argument("--nps-weight", "-nw", default=0.01, type=float, help="nps weight")
     ap.add_argument("--color-weight", "-clw", default=0.01, type=float, help="color weight")
+    ap.add_argument("--color-ratio", "-cr", default=0.0909090909, type=float, help="color ratio share for the weaker color term")
     ap.add_argument("--original-weight", "-ow", default=0.01, type=float, help="original weight")
     ap.add_argument("--fixed-location", "-fl", default=1, type=float, help="fixed location")
     ap.add_argument("--class-lambda", "-cl", default=1, type=float, help="class lambda")
