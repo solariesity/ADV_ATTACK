@@ -651,6 +651,9 @@ def run_style_transfer(
     decay_power = args["decay_power"]
     nps_weight = args["nps_weight"]
     color_weight = args["color_weight"]
+    color_ratio = args.get("color_ratio", 0.0909090909)
+    if not 0 <= color_ratio <= 1:
+        raise ValueError("color_ratio must be in [0, 1]")
     original_weight = args["original_weight"]
     device_num = args["device"]
     class_lambda = args["class_lambda"]
@@ -867,7 +870,14 @@ def run_style_transfer(
             elif color_scheme == 2:
                 color_loss_5 = color_loss.stain_color_loss(input_img, 0, content_red_mask)
                 color_loss_6 = color_loss.stain_color_loss(input_img, 2, content_yellow_mask)
-            color_loss_ = color_weight * (color_loss_1 * 0.1 + color_loss_2 + color_loss_3 + color_loss_4 * 0.1 + color_loss_5 + color_loss_6)
+            color_loss_ = color_weight * (
+                color_loss_1 * color_ratio
+                + color_loss_2 * (1 - color_ratio)
+                + color_loss_3 * (1 - color_ratio)
+                + color_loss_4 * color_ratio
+                + color_loss_5
+                + color_loss_6
+            )
 
             original_loss_ = color_loss.original_color_loss(input_img, original_input_img)
             original_loss_ *= original_weight
@@ -1069,9 +1079,11 @@ def run_style_transfer(
             print("Gradient:", input_img.grad.norm())
             print("adv loss:", adv_loss / adv_weight)
             print("content_loss:", content_score / content_weight)
+            print("color_ratio:", color_ratio)
             print("color_loss_:", color_loss_ / color_weight)
-            print("color_loss3:", color_loss_3)
-            print("color_loss4:", color_loss_4 / 0.1)
+            print("color_loss1:", color_loss_1)
+            print("color_loss3:", color_loss_3 / (1 - color_ratio))
+            print("color_loss4:", color_loss_4 / color_ratio)
 
             if run[0] > (1 - args["decay_steps"]) * num_steps:
                 LR_decay.step()
