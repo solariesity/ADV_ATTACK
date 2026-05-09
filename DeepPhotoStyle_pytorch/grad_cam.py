@@ -246,12 +246,12 @@ class CAM:
         cam = np.float32(img) + heatmap
         cam = cam / np.max(cam)
         if self.t_index == None:
-            Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam.jpg"))
-            Image.fromarray(np.uint8(255 * mask)).save(os.path.join(self.log_dir, "cam_b.jpg"))
+            # Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam.jpg"))
+            # Image.fromarray(np.uint8(255 * mask)).save(os.path.join(self.log_dir, "cam_b.jpg"))
 
         else:
-            Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam_" + str(self.t_index) + ".jpg"))
-        Image.fromarray(np.uint8(255 * cam_pure)).save(os.path.join(self.log_dir, "cam_p.jpg"))
+            # Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam_" + str(self.t_index) + ".jpg"))
+        # Image.fromarray(np.uint8(255 * cam_pure)).save(os.path.join(self.log_dir, "cam_p.jpg"))
 
         # cv2.imwrite("cam.jpg", np.uint8(255 * cam))
 
