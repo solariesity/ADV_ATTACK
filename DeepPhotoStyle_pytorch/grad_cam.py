@@ -248,12 +248,10 @@ class CAM:
         if self.t_index == None:
             # Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam.jpg"))
             # Image.fromarray(np.uint8(255 * mask)).save(os.path.join(self.log_dir, "cam_b.jpg"))
-<<<<<<< HEAD
             pass
-=======
->>>>>>> 222c0f1cc2f3d817eab4bb17fb85f3157d445fba
 
         else:
+            pass
             # Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam_" + str(self.t_index) + ".jpg"))
         # Image.fromarray(np.uint8(255 * cam_pure)).save(os.path.join(self.log_dir, "cam_p.jpg"))
 
