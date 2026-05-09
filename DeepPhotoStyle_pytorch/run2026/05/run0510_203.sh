@@ -8,38 +8,45 @@ PAINT_MASK="34"
 STEPS=400
 
 LABEL=(
-    "cw14_2.0_fl0"
+    "nps_1e-08"
+    "nps_1e-07"
+    "nps_1e-06"
+    "nps_1e-05"
+    "nps_1e-04"
+    "nps_1e-03"
+    "nps_1e-02"
+    "nps_1e-01"
 )
 
-STYLE_WEIGHT=(0)
-MASK_WEIGHT=(0)
-REALISTIC_WEIGHT=(0)
-COLOR_WEIGHT=(0.01)
+STYLE_WEIGHT=(0 0 0 0 0 0 0 0)
+MASK_WEIGHT=(0 0 0 0 0 0 0 0)
+REALISTIC_WEIGHT=(0 0 0 0 0 0 0 0)
+COLOR_WEIGHT=(0.01 0.01 0.01 0.01 0.01 0.01 0.01 0.01)
 
-LEARNING_RATE=(0.35)
-CONTENT_WEIGHT=(0.01)
+LEARNING_RATE=(0.35 0.35 0.35 0.35 0.35 0.35 0.35 0.35)
+CONTENT_WEIGHT=(0.01 0.01 0.01 0.01 0.01 0.01 0.01 0.01)
 ADV_TYPE="yolo"
-ADV_WEIGHT=(1)
-TV_WEIGHT=(0)
+ADV_WEIGHT=(1 1 1 1 1 1 1 1)
+TV_WEIGHT=(0 0 0 0 0 0 0 0)
 BATCH_SIZE=6
 DEPTH_MODEL="monodepth2"
 LOG_POSTFIX="mono_car_Rob_disp"
 BASELINE="proposed"
 STYLE_LAMBDA=2
-END_LEARNING_RATE=(0.014)
+END_LEARNING_RATE=(0.014 0.014 0.014 0.014 0.014 0.014 0.014 0.014)
 DECAY_STEPS=0.8
-DECAY_POWER=(2)
+DECAY_POWER=(2 2 2 2 2 2 2 2)
 DEVICE=1
-NPS_WEIGHT=(0.000000001)
-COLOR_WEIGHT_14=(2.0)
-COLOR_WEIGHT_2356=(18)
-ORIGINAL_WEIGHT=(0)
-FIXED_LOCATION=0
-CLASS_LAMBDA=(0.0000000001)
-MIDU_WEIGHT=(50)
+NPS_WEIGHT=(0.00000001 0.0000001 0.000001 0.00001 0.0001 0.001 0.01 0.1)
+COLOR_WEIGHT_14=(2.0 2.0 2.0 2.0 2.0 2.0 2.0 2.0)
+COLOR_WEIGHT_2356=(18 18 18 18 18 18 18 18)
+ORIGINAL_WEIGHT=(0 0 0 0 0 0 0 0)
+FIXED_LOCATION=1
+CLASS_LAMBDA=(0.0000000001 0.0000000001 0.0000000001 0.0000000001 0.0000000001 0.0000000001 0.0000000001 0.0000000001)
+MIDU_WEIGHT=(50 50 50 50 50 50 50 50)
 
 
-LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0509/color_203_fl0/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}"
+LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0510/color_203_nps/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}"
 LOG_FILE="$LOG_DIR/color_scan_${PAINT_MASK}_${STEPS}.txt"
 
 mkdir -p "$LOG_DIR"
@@ -47,8 +54,8 @@ mkdir -p "$LOG_DIR"
 echo "start" >> "$LOG_FILE"
 
 
-for i in {0,}; do
-    RESULT_FILE="$LOG_DIR/${LABEL[$i]}_LR_${LEARNING_RATE[$i]}_NPS_${NPS_WEIGHT[$i]}_FL_${FIXED_LOCATION}_CW14_${COLOR_WEIGHT_14[$i]}_CW2356_${COLOR_WEIGHT_2356[$i]}_MIDU_WEIGHT_${MIDU_WEIGHT[$i]}_${i}.txt"
+for i in {0,1,2,3,4,5,6,7}; do
+    RESULT_FILE="$LOG_DIR/${LABEL[$i]}_LR_${LEARNING_RATE[$i]}_NPS_${NPS_WEIGHT[$i]}_CW14_${COLOR_WEIGHT_14[$i]}_CW2356_${COLOR_WEIGHT_2356[$i]}_MIDU_WEIGHT_${MIDU_WEIGHT[$i]}_${i}.txt"
 
     echo "python /home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/test.py \
             -s "$STYLE_IMAGE" \
@@ -126,4 +133,5 @@ for i in {0,}; do
     echo "已可视化实验 $i 的结果" >> "$LOG_FILE"
 done
 
-echo "fixed_location=0 单轮实验已完成，请检查日志目录 $LOG_DIR" >> "$LOG_FILE"
+echo "nps_weight 扫描已完成，请检查日志目录 $LOG_DIR" >> "$LOG_FILE"
+bash /home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/run2026/05/run0510_203_2.sh
