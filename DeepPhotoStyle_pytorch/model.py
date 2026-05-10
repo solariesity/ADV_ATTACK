@@ -661,13 +661,15 @@ def run_style_transfer(
     yolo_result = None
     adv_scene_result = None
 
-    if args["random_scene"]:
-        kitti_loader_train = KittiLoader(mode="train", train_list="trainval.txt", val_list="val.txt")
-        train_loader = DataLoader(kitti_loader_train, batch_size=args["batch_size"], shuffle=True, num_workers=3, pin_memory=True)
-        scene_data_len = len(train_loader)
-        train_loader_iter = iter(train_loader)
+    kitti_loader_train = KittiLoader(mode="train", train_list="trainval.txt", val_list="val.txt")
+    train_loader = DataLoader(kitti_loader_train, batch_size=args["batch_size"], shuffle=True, num_workers=3, pin_memory=True)
+    scene_data_len = len(train_loader)
+    train_loader_iter = iter(train_loader)
 
+    if args["random_scene"]:
         print("Using random scene... Scene dataset size: ", scene_data_len)
+    else:
+        print("Scene dataset loaded (random_scene=False), size: ", scene_data_len)
 
     paint_mask = utils.get_mask_target(args["paint_mask"], car_mask.size(), paint_mask_init)
     init_mask_ratio = get_mask_ratio(paint_mask, car_mask).item()
@@ -739,6 +741,7 @@ def run_style_transfer(
     mask_loss = torch.zeros(1)
 
     scene_img_ = None
+    scene_img_fixed = None
     Cam = CAM()
 
     color_scheme = 0  # 0 for black-yellow, 1 for white-red, 2 for red-yellow
@@ -767,6 +770,7 @@ def run_style_transfer(
             nonlocal mask_loss
             nonlocal run_mask_optimize
             nonlocal scene_img_
+            nonlocal scene_img_fixed
             nonlocal yolo_result
             nonlocal adv_scene_result
             nonlocal Cam
