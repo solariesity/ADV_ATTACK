@@ -802,8 +802,16 @@ def run_style_transfer(
             content_score *= content_weight
             tv_score *= tv_weight
 
-            # 不随机场景
             if args["random_scene"]:
+                try:
+                    scene_img_, _ = next(train_loader_iter)
+                    if scene_img_.size()[0] != args["batch_size"]:
+                        raise StopIteration
+                except StopIteration:
+                    train_loader_iter = iter(train_loader)
+                    scene_img_, _ = next(train_loader_iter)
+                scene_img = scene_img_.to(config.device0)
+            else:
                 if run[0] == 0:
                     try:
                         scene_img_, _ = next(train_loader_iter)
@@ -812,9 +820,8 @@ def run_style_transfer(
                     except StopIteration:
                         train_loader_iter = iter(train_loader)
                         scene_img_, _ = next(train_loader_iter)
-                scene_img = scene_img_.to(config.device0)
-            else:
-                scene_img = scene_img_1
+                    scene_img_fixed = scene_img_.to(config.device0)
+                scene_img = scene_img_fixed
 
             eot_samples = args.get("eot_samples", 3)  # 默认为1，即不使用EOT
             adv_scene = None
