@@ -70,9 +70,36 @@ def create_mask(output_path, width=1563, height=1355, channels=1, foreground_val
     print(f"前景值: {foreground_value} | 背景值: {background_value}")
 
 
-# 示例使用
 if __name__ == "__main__":
-    # 使用默认值创建mask（与你的示例相同）左上右下
-    create_mask("/home/hyj/code/ADV_Attack/DeepPhotoStyle_pytorch/asset/src_img/car/BMW_PaintMask37.png", box=(630, 660, 1330, 980))
-    # 自定义参数创建mask
-    # create_mask(output_path="mask.png", width=1563, height=1355, channels=1, foreground_value=255, background_value=0, shape="rectangle")
+    target = "BMW"
+    mask_no = 20
+
+    # left = 630
+    # top = 660
+    # right = 1330
+    # bottom = 980
+
+    # HQ 示例参数
+    target = "HQ"
+    left = 192
+    top = 325
+    right = 481
+    bottom = 457
+
+    size_map = {
+        "BMW": (1563, 1355),
+        "HQ": (642, 557),
+    }
+
+    if target not in size_map:
+        raise ValueError(f"Unsupported target: {target}. Choose from {list(size_map)}")
+
+    width, height = size_map[target]
+
+    output_path = f"/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/car/{target}_PaintMask{mask_no}.png"
+    create_mask(
+        output_path=output_path,
+        width=width,
+        height=height,
+        box=(left, top, right, bottom),
+    )

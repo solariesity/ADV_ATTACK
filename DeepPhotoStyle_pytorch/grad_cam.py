@@ -11,13 +11,11 @@ import config
 
 
 class GradCamPP:
-
     hook_a, hook_g = None, None
 
     hook_handles = []
 
     def __init__(self, model, conv_layer, use_cuda=True):
-
         self.model = model.eval()
         self.use_cuda = use_cuda
         if self.use_cuda:
@@ -43,13 +41,11 @@ class GradCamPP:
         self.hook_g = grad_out[0]
 
     def _backprop(self, scores, class_idx):
-
         loss = scores[:, class_idx].sum()  # .requires_grad_(True)
         self.model.zero_grad()
         loss.backward(retain_graph=True)
 
     def _get_weights(self, class_idx, scores):
-
         self._backprop(scores, class_idx)
 
         grad_2 = self.hook_g.pow(2)
@@ -82,13 +78,11 @@ class GradCamPP:
 
 
 class GradCam:
-
     hook_a, hook_g = None, None
 
     hook_handles = []
 
     def __init__(self, model, conv_layer, use_cuda=True):
-
         self.model = model.eval()
         self.use_cuda = use_cuda
         if self.use_cuda:
@@ -113,13 +107,11 @@ class GradCam:
         self.hook_g = grad_out[0]
 
     def _backprop(self, scores, class_idx):
-
         loss = scores[:, class_idx].sum()  # .requires_grad_(True)
         self.model.zero_grad()
         loss.backward(retain_graph=True)
 
     def _get_weights(self, class_idx, scores):
-
         self._backprop(scores, class_idx)
 
         return self.hook_g.squeeze(0).mean(axis=(1, 2))
@@ -149,7 +141,6 @@ class GradCam:
 
 
 class CAM:
-
     def __init__(self):
         model = models.resnet50(pretrained=True)
         self.grad_cam = GradCam(model=model, conv_layer="layer4", use_cuda=True)
@@ -246,13 +237,13 @@ class CAM:
         cam = np.float32(img) + heatmap
         cam = cam / np.max(cam)
         if self.t_index == None:
-            # Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam.jpg"))
-            # Image.fromarray(np.uint8(255 * mask)).save(os.path.join(self.log_dir, "cam_b.jpg"))
+            Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam.jpg"))
+            Image.fromarray(np.uint8(255 * mask)).save(os.path.join(self.log_dir, "cam_b.jpg"))
             pass
 
         else:
+            Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam_" + str(self.t_index) + ".jpg"))
             pass
-            # Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam_" + str(self.t_index) + ".jpg"))
         # Image.fromarray(np.uint8(255 * cam_pure)).save(os.path.join(self.log_dir, "cam_p.jpg"))
 
         # cv2.imwrite("cam.jpg", np.uint8(255 * cam))
