@@ -435,7 +435,7 @@ def get_adv_loss(
         scene_mask = scene_paint_mask if args["baseline"] == "baseline" else scene_obj_mask
 
     adv_yolo = yolo_model(adv_scene)
-    mean_depth_diff = get_yolo_diff(adv_yolo, None, scene_obj_mask, yolo_model, class_lambda)
+    mean_depth_diff, best_conf = get_yolo_diff(adv_yolo, None, scene_obj_mask, yolo_model, class_lambda)
 
     loss_fun = torch.nn.MSELoss()
 
@@ -451,7 +451,7 @@ def get_adv_loss(
     elif args["adv_type"] == "yolo":
         adv_loss = -mean_depth_diff
 
-    return adv_loss, mean_depth_diff, adv_scene
+    return adv_loss, mean_depth_diff, adv_scene, best_conf
 
 
 def get_lp_norm_loss(input_img, content_img, paint_mask):
@@ -592,7 +592,7 @@ def direction_update(
             paint_mask_temp = utils.get_mask_target(args["paint_mask"], car_mask.size(), paint_mask_init_new)
             if paint_mask_temp == None:
                 continue
-            adv_loss_temp, _ = get_adv_loss(
+            adv_loss_temp, _, _, _ = get_adv_loss(
                 input_img,
                 car_img,
                 scene_img,
@@ -657,6 +657,7 @@ def run_style_transfer(
     device_num = args["device"]
     class_lambda = args["class_lambda"]
     midu_weight = args["midu_weight"]
+    color_power = args.get("color_power", 1)
 
     yolo_result = None
     adv_scene_result = None
@@ -834,13 +835,15 @@ def run_style_transfer(
                 total_adv_loss = torch.zeros(1).to(config.device0)
                 total_midu_loss = torch.zeros(1).to(config.device0)
                 total_train_mean_diff = torch.zeros(1).to(config.device0)
+                total_best_conf = torch.tensor(0.0).to(config.device0)
 
                 # 三次eot
                 for _ in range(eot_samples):
                     transformed_scene_img = eot.apply_random_transforms(scene_img)
-                    single_adv_loss, single_train_mean_diff, adv_scene = get_adv_loss(input_img, car_img, transformed_scene_img, paint_mask, car_mask, yolo_model_2, content_mask, args)
+                    single_adv_loss, single_train_mean_diff, adv_scene, best_conf = get_adv_loss(input_img, car_img, transformed_scene_img, paint_mask, car_mask, yolo_model_2, content_mask, args)
                     total_adv_loss += single_adv_loss.item()
                     total_train_mean_diff += single_train_mean_diff.item()
+                    total_best_conf += best_conf.item()
                     t_index = 656
                     adv_scene_ = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(adv_scene[0].unsqueeze(0))
                     mask, pred = Cam(adv_scene_, t_index, log_dir)
@@ -854,10 +857,11 @@ def run_style_transfer(
                 adv_loss = total_adv_loss / eot_samples
                 midu_loss = total_midu_loss / eot_samples
                 train_mean_diff = total_train_mean_diff / eot_samples
+                best_conf = total_best_conf / eot_samples
 
             else:
                 # 如果 eot_samples <= 1，则按原来的方式执行
-                adv_loss, train_mean_diff, adv_scene = get_adv_loss(input_img, car_img, scene_img, paint_mask, car_mask, yolo_model_2, content_mask, args)
+                adv_loss, train_mean_diff, adv_scene, best_conf = get_adv_loss(input_img, car_img, scene_img, paint_mask, car_mask, yolo_model_2, content_mask, args)
 
             adv_loss *= adv_weight
             # print(input_img.shape)
@@ -868,14 +872,14 @@ def run_style_transfer(
             color_loss_1 = color_loss_2 = color_loss_3 = color_loss_4 = color_loss_5 = color_loss_6 = torch.zeros(1).float().to(config.device0)
 
             if color_scheme == 0:
-                color_loss_1 = color_loss.stain_color_loss(input_img, 0, content_red_mask)
-                color_loss_2 = color_loss.stain_color_loss(input_img, 1, content_white_mask)
+                color_loss_1 = color_loss.stain_color_loss(input_img, 0, content_red_mask, color_power=color_power)
+                color_loss_2 = color_loss.stain_color_loss(input_img, 1, content_white_mask, color_power=color_power)
             elif color_scheme == 1:
-                color_loss_3 = color_loss.stain_color_loss(input_img, 2, content_yellow_mask)
-                color_loss_4 = color_loss.stain_color_loss(input_img, 3, content_black_mask)
+                color_loss_3 = color_loss.stain_color_loss(input_img, 2, content_yellow_mask, color_power=color_power)
+                color_loss_4 = color_loss.stain_color_loss(input_img, 3, content_black_mask, color_power=color_power)
             elif color_scheme == 2:
-                color_loss_5 = color_loss.stain_color_loss(input_img, 0, content_red_mask)
-                color_loss_6 = color_loss.stain_color_loss(input_img, 2, content_yellow_mask)
+                color_loss_5 = color_loss.stain_color_loss(input_img, 0, content_red_mask, color_power=color_power)
+                color_loss_6 = color_loss.stain_color_loss(input_img, 2, content_yellow_mask, color_power=color_power)
             color_loss_ = (
                 color_loss_1 * color_weight_14
                 + color_loss_4 * color_weight_14
@@ -955,16 +959,17 @@ def run_style_transfer(
                     direction_update(paint_mask_init, adv_loss, input_img, car_img, scene_img, car_mask, depth_model, adv_weight, args)
 
             run[0] += 1
-            if run[0] % 20 == 0 or run[0] == 1:
+            if run[0] % 100 == 0 or run[0] == 1:
                 print("run {}/{}:".format(run, num_steps))
 
                 print(
-                    "Style Loss: {:4f} Content Loss: {:4f} TV Loss: {:4f} real loss: {:4f} adv_loss: {:4f} l1_norm_loss: {:4f} mask_loss: {:4f} nps_loss: {:4f} color_loss: {:4f} original_loss: {:4f} midu_loss: {:4f}".format(
+                    "Style Loss: {:4f} Content Loss: {:4f} TV Loss: {:4f} real loss: {:4f} adv_loss: {:4f} conf: {:.4f} l1_norm_loss: {:4f} mask_loss: {:4f} nps_loss: {:4f} color_loss: {:4f} original_loss: {:4f} midu_loss: {:4f}".format(
                         style_score.item(),
                         content_score.item(),
                         tv_score.item(),
                         rl_score.item(),
                         adv_loss.item(),
+                        best_conf.item(),
                         l1_loss.item(),
                         mask_loss.item(),
                         nps_loss_.item(),
@@ -993,8 +998,7 @@ def run_style_transfer(
                 logger.add_scalar("Train/Mean_depth_diff_training", train_mean_diff.item(), run[0])
                 # logger.add_image('Train/Paint_mask', np.moveaxis(color_mapping(paint_mask, vmax=1, vmin=0), -1, 0), run[0])
 
-                if run[0] % 100 == 0 or run[0] == 1:
-                    # if run[0] % 50 == 0 or run[0] == 1:
+                if run[0] % 100 == 0 or run[0] == 1 or run[0] == num_steps:
                     texture_img = utils.texture_to_car_size(input_img.data.clone(), car_img.size())
                     # add mask and evluate
                     if args["paint_mask"] == "-2":
@@ -1083,10 +1087,11 @@ def run_style_transfer(
                     del adv_yolo, output_img, output_img_np  # 显式释放
                     torch.cuda.empty_cache()  # 清理缓存
             print("Gradient:", input_img.grad.norm())
-            print("adv loss:", adv_loss / adv_weight)
+            print("adv loss:", adv_loss / adv_weight, "conf:", best_conf.item())
             print("color_loss_:", color_loss_)
             print("color_loss3:", color_loss_3 / color_weight_2356)
             print("color_loss4:", color_loss_4 / color_weight_14)
+            print("total loss:", loss.item())
 
             if run[0] > (1 - args["decay_steps"]) * num_steps:
                 LR_decay.step()

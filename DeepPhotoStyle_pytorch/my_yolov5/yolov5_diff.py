@@ -219,7 +219,7 @@ def get_yolo_diff(
     # 3. 无有效目标时直接返回 0
     # -----------------------------
     if len(valid_scores) == 0:
-        return torch.tensor(0.0, device=pred.device)
+        return torch.tensor(0.0, device=pred.device), torch.tensor(0.0, device=pred.device)
 
     valid_scores = torch.stack(valid_scores)
     valid_confs = torch.stack(valid_confs)
@@ -237,4 +237,4 @@ def get_yolo_diff(
     # -----------------------------
     loss = torch.log10(1.0 - best_conf + 1e-6) - class_lambda * best_class_prob[2]
 
-    return loss
+    return loss, best_conf.detach()

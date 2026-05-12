@@ -46,6 +46,14 @@ MODE_CONFIG = {
         "output_suffix": "_midu.png",
         "extract_message": "adv loss values",
     },
+    "total": {
+        "pattern": r"total loss: (\d+\.\d+)",
+        "label": "Total Loss",
+        "title": "Total Loss Over Steps",
+        "ylabel": "Loss Value",
+        "output_suffix": "_total.png",
+        "extract_message": "total loss values",
+    },
     "score": {
         "pattern": r"max_combined_score: tensor\((\d+\.\d+)",
         "label": "max_combined_score",

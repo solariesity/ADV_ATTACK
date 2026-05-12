@@ -822,6 +822,7 @@ def stain_color_loss(
     tensor: torch.Tensor,
     target: bool = int,  #  "red":0 "white":1 "yellow":2 "black":3
     mask: torch.Tensor = None,  # 新增：掩码 [B, H, W] 或 [1, H, W]，值域[0,1]
+    color_power: int = 1,
 ):
     """
     计算像素到目标颜色集（红/白）的最小距离损失（支持掩码区域计算）
@@ -829,15 +830,13 @@ def stain_color_loss(
         tensor: [B, 3, H, W] 输入图像（RGB, 值范围[0,1]）
         target: "white" 或 "red"，指定计算白色或红色的距离
         mask: 可选，[B, H, W] 或 [1, H, W]，仅计算mask=1的区域损失
-        white_colors: 预生成的白色颜色集 [K_white, 3]
-        red_colors: 预生成的红色颜色集 [K_red, 3]
+        color_power: 1=均值, 2=平方（压制颜色峰值）
     返回：
         loss: 掩码区域内的平均最小距离
     """
     assert white_colors is not None and red_colors is not None, "颜色集未提供"
 
     # 选择目标颜色集
-    # stain_colors = white_colors if target else red_colors  # [K, 3]
     if target == 0:
         stain_colors = red_colors
     elif target == 1:
@@ -851,6 +850,9 @@ def stain_color_loss(
     tensor = tensor.permute(0, 2, 3, 1)  # [B, H, W, 3]
     distances = torch.norm(tensor.unsqueeze(-2) - stain_colors, dim=-1)  # [B, H, W, K]
     min_distances = torch.min(distances, dim=-1)[0]  # [B, H, W]
+
+    if color_power != 1:
+        min_distances = min_distances ** color_power
 
     # 应用掩码（如果提供）
     if mask is not None:

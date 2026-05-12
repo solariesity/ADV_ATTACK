@@ -82,6 +82,7 @@ if __name__ == "__main__":
     ap.add_argument("--fixed-location", "-fl", default=1, type=float, help="fixed location")
     ap.add_argument("--class-lambda", "-cl", default=1, type=float, help="class lambda")
     ap.add_argument("--midu-weight", "-ml", default=10000, type=float, help="midu weight")
+    ap.add_argument("--color-power", "-cp", default=1, type=int, choices=[1, 2], help="Color loss power: 1=mean (default), 2=squared")
 
     args = vars(ap.parse_args())
     print(str(args))
