@@ -21,7 +21,7 @@ def attach_car_to_scene_fixed(scene_img, adv_car_img, car_img, car_mask, object_
     B_Sce, _, H_Sce, W_Sce = adv_scene.size()
 
     for idx_Bat in range(B_Sce):
-        if object_name == "BMW.png" or object_name == "TrafficBarrier2.png":
+        if object_name == "BMW.png" or object_name == "TrafficBarrier2.png" or object_name == "HQ.png":
             scale = 0.4  # 600 -- 0.4, 300 -- 0.7
         elif object_name == "Pedestrain2.png":
             scale = 0.14
