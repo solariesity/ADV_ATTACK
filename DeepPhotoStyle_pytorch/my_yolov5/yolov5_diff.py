@@ -224,7 +224,7 @@ def get_yolo_diff(
     # -----------------------------
     if len(valid_scores) == 0:
         zero = torch.tensor(0.0, device=pred.device)
-        return zero, zero, zero
+        return zero, zero
 
     valid_scores = torch.stack(valid_scores)
     valid_display_scores = torch.stack(valid_display_scores)
@@ -235,7 +235,6 @@ def get_yolo_diff(
     # 4. 选取得分最高的目标
     # -----------------------------
     best_idx = torch.argmax(valid_scores)
-    best_score = valid_scores[best_idx]
     best_display_score = valid_display_scores[best_idx]
     best_conf = valid_confs[best_idx]
     best_class_prob = valid_class_probs[best_idx]
@@ -245,4 +244,4 @@ def get_yolo_diff(
     # -----------------------------
     loss = torch.log10(1.0 - best_conf + 1e-6) - class_lambda * best_class_prob[2]
 
-    return loss, best_score.detach(), best_display_score.detach()
+    return loss, best_display_score.detach()

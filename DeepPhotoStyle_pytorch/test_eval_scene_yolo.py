@@ -6,13 +6,13 @@ import torchvision.transforms as transforms
 
 import config
 import my_utils as utils
-from my_yolov5.yolov5_draw import plot_detections, plot_detections_official, preprocess_input_tensor_for_yolo, yolo_result_nms, yolo_result_nms_official
+from my_yolov5.yolov5_draw import plot_detections, plot_detections_official, preprocess_input_tensor_for_yolo, yolo_result_nms
 from my_yolov5.yolov5_model import import_yolov5s_model_1, import_yolov5s_model_2
 
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(CURRENT_DIR, "output_test")
-IMAGE_PATH = os.path.join(CURRENT_DIR, "asset", "src_img", "car", "hongqi.jpg")
+OUTPUT_DIR = os.path.join(CURRENT_DIR, "test_output", "test")
+IMAGE_PATH = os.path.join(OUTPUT_DIR, "35_eval_adv_scene_first.png")
 
 
 def round_up_to_stride(value, stride=32):
@@ -70,42 +70,33 @@ def save_tensor_as_image(tensor, output_path):
     image = transforms.ToPILImage()(image_tensor)
     image.save(output_path)
 
+
 if not os.path.exists(IMAGE_PATH):
     raise FileNotFoundError(f"Image not found: {IMAGE_PATH}")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 image = Image.open(IMAGE_PATH).convert("RGB")
-original_width, original_height = image.size
-resized_width = round_up_to_stride(original_width, 32)
-resized_height = round_up_to_stride(original_height, 32)
-resized_image = transforms.Resize((resized_height, resized_width))(image)
-input_tensor = utils.image_to_tensor(resized_image)[:3, :, :].unsqueeze(0).to(config.device0, torch.float)
-
-old_resize_output_path = os.path.join(OUTPUT_DIR, "hongqi_resize_old.jpg")
-resized_image.save(old_resize_output_path)
-print(f"Saved old-resize image to: {old_resize_output_path}")
+input_tensor = utils.image_to_tensor(image)[:3, :, :].unsqueeze(0).to(config.device0, torch.float)
 
 print(f"Loaded image: {IMAGE_PATH}")
-print(f"Original size: {(original_width, original_height)}")
-print(f"Resized size: {(resized_width, resized_height)}")
 print(f"Tensor shape: {tuple(input_tensor.shape)}")
 print(f"Device: {config.device0}")
 
 device_num = config.device0.index if config.device0.type == "cuda" and config.device0.index is not None else 0
+
 model_tensor = import_yolov5s_model_2(device_num, None, "yolov5s")
 model_tensor.eval()
 
 with torch.no_grad():
     model_output = model_tensor(input_tensor)
-    output_img = plot_detections(model_output, input_tensor)
-    final_boxes, final_scores, final_class_ids, class_names = yolo_result_nms(model_output, input_tensor)
+    tensor_output_img = plot_detections(model_output, input_tensor)
+    tensor_boxes, tensor_scores, tensor_class_ids, tensor_names = yolo_result_nms(model_output, input_tensor)
 
-output_path = os.path.join(OUTPUT_DIR, "hongqi_yolo_result_tensor.jpg")
-output_img.save(output_path)
-print(f"Saved tensor-path result image to: {output_path}")
-
-print_tensor_detections("Tensor-path detections", final_boxes, final_scores, final_class_ids, class_names)
+tensor_output_path = os.path.join(OUTPUT_DIR, "35_eval_adv_scene_first_tensor.jpg")
+tensor_output_img.save(tensor_output_path)
+print(f"Saved tensor-path result image to: {tensor_output_path}")
+print_tensor_detections("Tensor-path detections", tensor_boxes, tensor_scores, tensor_class_ids, tensor_names)
 
 model_stride = getattr(model_tensor, "stride", 32)
 if isinstance(model_stride, torch.Tensor):
@@ -115,15 +106,16 @@ elif isinstance(model_stride, (list, tuple)):
 else:
     stride = int(max(model_stride, 32))
 
-full_tensor_input, _ = preprocess_input_tensor_for_yolo(input_tensor, image_size=(640, 640), stride=stride)
-official_resize_output_path = os.path.join(OUTPUT_DIR, "hongqi_resize_official.jpg")
-save_tensor_as_image(full_tensor_input[0], official_resize_output_path)
-print(f"Saved official-preprocess image to: {official_resize_output_path}")
-with torch.no_grad():
-    full_model_output = model_tensor(full_tensor_input)
+official_input_tensor, _ = preprocess_input_tensor_for_yolo(input_tensor, image_size=(640, 640), stride=stride)
+official_input_path = os.path.join(OUTPUT_DIR, "35_eval_adv_scene_first_official_input.jpg")
+save_tensor_as_image(official_input_tensor[0], official_input_path)
+print(f"Saved official-preprocess input to: {official_input_path}")
 
-full_tensor_output, full_tensor_detections, full_tensor_names = plot_detections_official(
-    full_model_output,
+with torch.no_grad():
+    official_output = model_tensor(official_input_tensor)
+
+official_result_img, official_detections, official_names = plot_detections_official(
+    official_output,
     input_tensor,
     image_size=(640, 640),
     stride=stride,
@@ -134,26 +126,25 @@ full_tensor_output, full_tensor_detections, full_tensor_names = plot_detections_
     max_det=int(getattr(model_tensor, "max_det", 300)),
     return_detections=True,
 )
-full_tensor_output_path = os.path.join(OUTPUT_DIR, "hongqi_yolo_result_tensor_full.jpg")
-full_tensor_output.save(full_tensor_output_path)
-print(f"Saved full-tensor-path result image to: {full_tensor_output_path}")
-print(f"Full tensor input shape: {tuple(full_tensor_input.shape)}")
-print_official_detections("Full-tensor-path detections", full_tensor_detections, full_tensor_names)
+official_output_path = os.path.join(OUTPUT_DIR, "35_eval_adv_scene_first_official.jpg")
+official_result_img.save(official_output_path)
+print(f"Saved official-tensor result image to: {official_output_path}")
+print_official_detections("Official-tensor detections", official_detections, official_names)
 
 model_image = import_yolov5s_model_1(device_num, None, "yolov5s")
 model_image.eval()
 results = model_image(IMAGE_PATH)
 
-image_output = Image.fromarray(results.render()[0])
-image_output_path = os.path.join(OUTPUT_DIR, "hongqi_yolo_result_import1.jpg")
-image_output.save(image_output_path)
-print(f"Saved import1-path result image to: {image_output_path}")
+import1_img = Image.fromarray(results.render()[0])
+import1_output_path = os.path.join(OUTPUT_DIR, "35_eval_adv_scene_first_import1.jpg")
+import1_img.save(import1_output_path)
+print(f"Saved import1 result image to: {import1_output_path}")
 
 df = results.pandas().xyxy[0]
 if df.empty:
-    print("Import1-path detections: none above threshold.")
+    print("Import1 detections: none above threshold.")
 else:
-    print("Import1-path detections:")
+    print("Import1 detections:")
     for i, row in df.iterrows():
         print(
             f"[{i}] class={row['name']} class_id={int(row['class'])} "
@@ -162,4 +153,4 @@ else:
         )
 
     best_row = df.loc[df["confidence"].idxmax()]
-    print(f"Import1-path best detection confidence: {best_row['confidence']:.6f}")
+    print(f"Import1 best detection confidence: {best_row['confidence']:.6f}")

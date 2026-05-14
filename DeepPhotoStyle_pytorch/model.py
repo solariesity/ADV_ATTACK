@@ -406,6 +406,7 @@ def get_adv_loss(
     batch_size = args["batch_size"]
     fixed_location = args["fixed_location"]
     class_lambda = args["class_lambda"]
+    use_official_yolo_tensor = bool(args.get("official_yolo_tensor", 0))
 
     # compose adversarial image
 
@@ -434,8 +435,21 @@ def get_adv_loss(
 
         scene_mask = scene_paint_mask if args["baseline"] == "baseline" else scene_obj_mask
 
-    adv_yolo = yolo_model(adv_scene)
-    mean_depth_diff, best_conf, display_conf = get_yolo_diff(adv_yolo, None, scene_obj_mask, yolo_model, class_lambda)
+    if use_official_yolo_tensor:
+        stride = get_model_stride(yolo_model)
+        adv_scene_for_yolo, _ = preprocess_input_tensor_for_yolo(adv_scene, image_size=(640, 640), stride=stride)
+        scene_obj_mask_for_yolo, _ = preprocess_input_tensor_for_yolo(
+            scene_obj_mask.float(),
+            image_size=(640, 640),
+            stride=stride,
+            fill_color=0.0,
+            interpolation_mode="nearest",
+        )
+        adv_yolo = yolo_model(adv_scene_for_yolo)
+        mean_depth_diff, display_conf = get_yolo_diff(adv_yolo, None, scene_obj_mask_for_yolo, yolo_model, class_lambda)
+    else:
+        adv_yolo = yolo_model(adv_scene)
+        mean_depth_diff, display_conf = get_yolo_diff(adv_yolo, None, scene_obj_mask, yolo_model, class_lambda)
 
     loss_fun = torch.nn.MSELoss()
 
@@ -451,7 +465,7 @@ def get_adv_loss(
     elif args["adv_type"] == "yolo":
         adv_loss = -mean_depth_diff
 
-    return adv_loss, mean_depth_diff, adv_scene, best_conf, display_conf
+    return adv_loss, mean_depth_diff, adv_scene, display_conf
 
 
 def get_lp_norm_loss(input_img, content_img, paint_mask):
@@ -592,7 +606,7 @@ def direction_update(
             paint_mask_temp = utils.get_mask_target(args["paint_mask"], car_mask.size(), paint_mask_init_new)
             if paint_mask_temp == None:
                 continue
-            adv_loss_temp, _, _, _, _ = get_adv_loss(
+            adv_loss_temp, _, _, _ = get_adv_loss(
                 input_img,
                 car_img,
                 scene_img,
@@ -835,13 +849,12 @@ def run_style_transfer(
                 total_adv_loss = torch.zeros(1).to(config.device0)
                 total_midu_loss = torch.zeros(1).to(config.device0)
                 total_train_mean_diff = torch.zeros(1).to(config.device0)
-                total_best_conf = torch.tensor(0.0).to(config.device0)
                 total_display_conf = torch.tensor(0.0).to(config.device0)
 
                 # 三次eot
                 for _ in range(eot_samples):
                     transformed_scene_img = eot.apply_random_transforms(scene_img)
-                    single_adv_loss, single_train_mean_diff, adv_scene, best_conf, display_conf = get_adv_loss(
+                    single_adv_loss, single_train_mean_diff, adv_scene, display_conf = get_adv_loss(
                         input_img,
                         car_img,
                         transformed_scene_img,
@@ -853,7 +866,6 @@ def run_style_transfer(
                     )
                     total_adv_loss += single_adv_loss.item()
                     total_train_mean_diff += single_train_mean_diff.item()
-                    total_best_conf += best_conf.item()
                     total_display_conf += display_conf.item()
                     t_index = 656
                     adv_scene_ = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(adv_scene[0].unsqueeze(0))
@@ -864,16 +876,16 @@ def run_style_transfer(
                     midu_loss_ *= midu_weight
                     total_midu_loss += midu_loss_
                     (single_adv_loss * adv_weight / eot_samples).backward(retain_graph=True)
+                    print("EOT backward grad:", input_img.grad is not None, 0.0 if input_img.grad is None else input_img.grad.norm().item())
 
                 adv_loss = total_adv_loss / eot_samples
                 midu_loss = total_midu_loss / eot_samples
                 train_mean_diff = total_train_mean_diff / eot_samples
-                best_conf = total_best_conf / eot_samples
                 display_conf = total_display_conf / eot_samples
 
             else:
                 # 如果 eot_samples <= 1，则按原来的方式执行
-                adv_loss, train_mean_diff, adv_scene, best_conf, display_conf = get_adv_loss(
+                adv_loss, train_mean_diff, adv_scene, display_conf = get_adv_loss(
                     input_img, car_img, scene_img, paint_mask, car_mask, yolo_model_2, content_mask, args
                 )
 
@@ -974,6 +986,121 @@ def run_style_transfer(
 
             run[0] += 1
             if run[0] % 100 == 0 or run[0] == 1:
+                logged_conf = display_conf.item()
+
+                if run[0] % 100 == 0 or run[0] == 1 or run[0] == num_steps:
+                    texture_img = utils.texture_to_car_size(input_img.data.clone(), car_img.size())
+                    # add mask and evluate
+                    if args["paint_mask"] == "-2":
+                        saved_img = texture_img * paint_mask.unsqueeze(0) + car_img * (1 - paint_mask.unsqueeze(0))
+                    if args["paint_mask"] != "-2":
+                        saved_img = image_to_car(input_img, paint_mask, content_mask, car_img)
+
+                    saved_img.data.clamp_(0, 1)
+
+                    if args["l1_norm"]:
+                        log_perterbation(logger, input_img, car_img, paint_mask, run[0])
+
+                    # generated_root_path = utils.project_root + "pseudo_lidar/figures/GeneratedAtks/"
+                    # scene_name_set = ["000001", "000004", "000009", "000027", "000033", "000034", "000038", "000042", "000051", "000059", "000097", "000127", "0000000090", "000005"]
+                    # mean_depth_diff = 0
+                    # for validator_scene_name in scene_name_set:
+                    #     test_scene_img_path = os.path.join(generated_root_path, "Scene", f"{validator_scene_name}.png")
+                    #     test_scene_img = pil.open(test_scene_img_path)
+                    #     original_w, original_h = test_scene_img.size
+                    #     scene_size = (1024, 320)
+                    #     new_w, new_h = scene_size
+                    #     left = (original_w - new_w) // 2
+                    #     right = left + new_w
+                    #     top = original_h - new_h
+                    #     bottom = original_h
+                    #     test_scene_img = test_scene_img.crop((left, top, right, bottom))
+                    #     test_scene_img = transforms.ToTensor()(test_scene_img)[:3, :, :].unsqueeze(0).to(config.device0)
+                    #
+                    #     (
+                    #         adv_scene_out,
+                    #         car_scene_out,
+                    #         scene_car_mask,
+                    #         scene_paint_mask,
+                    #     ) = attach_car_to_scene_validator(
+                    #         test_scene_img,
+                    #         # scene_img,
+                    #         saved_img,
+                    #         car_img,
+                    #         car_mask,
+                    #         args["batch_size"],
+                    #         paint_mask,
+                    #         args["vehicle"],
+                    #     )
+                    # logger.add_image("Train/Car_scene", car_scene_out[0], run[0])
+                    # logger.add_image("Train/Adv_scene", adv_scene_out[0], run[0])
+                    # logger.add_image("Train/Adv_car", saved_img[0], run[0])
+                    # logger.add_image(
+                    #     "Train/Adv_patch",
+                    #     utils.extract_patch(saved_img, paint_mask)[0],
+                    #     run[0],
+                    # )
+                    # logger.add_image(
+                    #     "Train/Paint_mask",
+                    #     np.moveaxis(color_mapping(paint_mask, vmax=1, vmin=0), -1, 0),
+                    #     run[0],
+                    # )
+
+                    if args["paint_mask"] == "-2":
+                        input_img_resize = utils.texture_to_car_size(input_img, car_img.size())
+                        adv_car_image = input_img_resize * paint_mask.unsqueeze(0) + car_img * (1 - paint_mask.unsqueeze(0))
+                    if args["paint_mask"] != "-2":
+                        adv_car_image = image_to_car(input_img, paint_mask, content_mask, car_img)
+
+                    fixed_location = args["fixed_location"]
+                    if fixed_location:
+                        adv_scene, car_scene, scene_obj_mask = attach_car_to_scene_fixed(scene_img, adv_car_image, car_img, car_mask, object_name=args["vehicle"])
+
+                    else:
+                        adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_car_to_scene_Robustness_training(
+                            scene_img, adv_car_image, car_img, car_mask, args["batch_size"], paint_mask, args["vehicle"]
+                        )
+
+                    with torch.no_grad():  # ← 添加无梯度上下文
+                        if bool(args.get("official_yolo_tensor", 0)):
+                            stride = get_model_stride(yolo_model_2)
+                            adv_scene_for_yolo, _ = preprocess_input_tensor_for_yolo(adv_scene, image_size=(640, 640), stride=stride)
+                            adv_yolo = yolo_model_2(adv_scene_for_yolo)
+                            output_img, plotted_detections, _ = plot_detections_official(
+                                adv_yolo,
+                                adv_scene,
+                                image_size=(640, 640),
+                                stride=stride,
+                                conf_threshold=float(getattr(yolo_model_2, "conf", 0.1)),
+                                iou_threshold=float(getattr(yolo_model_2, "iou", 0.45)),
+                                class_names=getattr(yolo_model_2, "names", None),
+                                agnostic=bool(getattr(yolo_model_2, "agnostic", False)),
+                                max_det=int(getattr(yolo_model_2, "max_det", 300)),
+                                return_detections=True,
+                            )
+                            if plotted_detections is not None and len(plotted_detections) > 0:
+                                logged_conf = plotted_detections[:, 4].max().item()
+                        else:
+                            adv_yolo = yolo_model_2(adv_scene)
+                            # adv_yolo = convert_xywh_to_original(adv_yolo)
+                            output_img, _, plotted_scores, _, _ = plot_detections(
+                                adv_yolo,
+                                adv_scene,
+                                return_detections=True,
+                            )
+                            if plotted_scores is not None and len(plotted_scores) > 0:
+                                logged_conf = plotted_scores.max().item()
+
+                    output_img_np = np.array(output_img)
+                    logger.add_image("Train/YOLO_Adv_scene", output_img_np, run[0], dataformats="HWC")
+
+                    if run[0] > num_steps - 30:
+                        yolo_result = output_img
+                        adv_scene_result = adv_scene
+
+                    del adv_yolo, output_img, output_img_np  # 显式释放
+                    torch.cuda.empty_cache()  # 清理缓存
+
                 print("run {}/{}:".format(run, num_steps))
 
                 print(
@@ -983,7 +1110,7 @@ def run_style_transfer(
                         tv_score.item(),
                         rl_score.item(),
                         adv_loss.item(),
-                        display_conf.item(),
+                        logged_conf,
                         l1_loss.item(),
                         mask_loss.item(),
                         nps_loss_.item(),
@@ -1011,97 +1138,10 @@ def run_style_transfer(
                 logger.add_scalar("Train/Mask_obj_ratio", mask_ratio.item(), run[0])
                 logger.add_scalar("Train/Mean_depth_diff_training", train_mean_diff.item(), run[0])
                 # logger.add_image('Train/Paint_mask', np.moveaxis(color_mapping(paint_mask, vmax=1, vmin=0), -1, 0), run[0])
-
-                if run[0] % 100 == 0 or run[0] == 1 or run[0] == num_steps:
-                    texture_img = utils.texture_to_car_size(input_img.data.clone(), car_img.size())
-                    # add mask and evluate
-                    if args["paint_mask"] == "-2":
-                        saved_img = texture_img * paint_mask.unsqueeze(0) + car_img * (1 - paint_mask.unsqueeze(0))
-                    if args["paint_mask"] != "-2":
-                        saved_img = image_to_car(input_img, paint_mask, content_mask, car_img)
-
-                    saved_img.data.clamp_(0, 1)
-
-                    if args["l1_norm"]:
-                        log_perterbation(logger, input_img, car_img, paint_mask, run[0])
-
-                    generated_root_path = utils.project_root + "pseudo_lidar/figures/GeneratedAtks/"
-                    scene_name_set = ["000001", "000004", "000009", "000027", "000033", "000034", "000038", "000042", "000051", "000059", "000097", "000127", "0000000090", "000005"]
-                    mean_depth_diff = 0
-                    for validator_scene_name in scene_name_set:
-                        test_scene_img_path = os.path.join(generated_root_path, "Scene", f"{validator_scene_name}.png")
-                        test_scene_img = pil.open(test_scene_img_path)
-                        original_w, original_h = test_scene_img.size
-                        scene_size = (1024, 320)
-                        new_w, new_h = scene_size
-                        left = (original_w - new_w) // 2
-                        right = left + new_w
-                        top = original_h - new_h
-                        bottom = original_h
-                        test_scene_img = test_scene_img.crop((left, top, right, bottom))
-                        test_scene_img = transforms.ToTensor()(test_scene_img)[:3, :, :].unsqueeze(0).to(config.device0)
-
-                        (
-                            adv_scene_out,
-                            car_scene_out,
-                            scene_car_mask,
-                            scene_paint_mask,
-                        ) = attach_car_to_scene_validator(
-                            test_scene_img,
-                            # scene_img,
-                            saved_img,
-                            car_img,
-                            car_mask,
-                            args["batch_size"],
-                            paint_mask,
-                            args["vehicle"],
-                        )
-                    logger.add_image("Train/Car_scene", car_scene_out[0], run[0])
-                    logger.add_image("Train/Adv_scene", adv_scene_out[0], run[0])
-                    logger.add_image("Train/Adv_car", saved_img[0], run[0])
-                    logger.add_image(
-                        "Train/Adv_patch",
-                        utils.extract_patch(saved_img, paint_mask)[0],
-                        run[0],
-                    )
-                    logger.add_image(
-                        "Train/Paint_mask",
-                        np.moveaxis(color_mapping(paint_mask, vmax=1, vmin=0), -1, 0),
-                        run[0],
-                    )
-
-                    if args["paint_mask"] == "-2":
-                        input_img_resize = utils.texture_to_car_size(input_img, car_img.size())
-                        adv_car_image = input_img_resize * paint_mask.unsqueeze(0) + car_img * (1 - paint_mask.unsqueeze(0))
-                    if args["paint_mask"] != "-2":
-                        adv_car_image = image_to_car(input_img, paint_mask, content_mask, car_img)
-
-                    fixed_location = args["fixed_location"]
-                    if fixed_location:
-                        adv_scene, car_scene, scene_obj_mask = attach_car_to_scene_fixed(scene_img, adv_car_image, car_img, car_mask, object_name=args["vehicle"])
-
-                    else:
-                        adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_car_to_scene_Robustness_training(
-                            scene_img, adv_car_image, car_img, car_mask, args["batch_size"], paint_mask, args["vehicle"]
-                        )
-
-                    with torch.no_grad():  # ← 添加无梯度上下文
-                        adv_yolo = yolo_model_2(adv_scene)
-                        # adv_yolo = convert_xywh_to_original(adv_yolo)
-
-                        output_img = plot_detections(adv_yolo, adv_scene)
-
-                    output_img_np = np.array(output_img)
-                    logger.add_image("Train/YOLO_Adv_scene", output_img_np, run[0], dataformats="HWC")
-
-                    if run[0] > num_steps - 30:
-                        yolo_result = output_img
-                        adv_scene_result = adv_scene
-
-                    del adv_yolo, output_img, output_img_np  # 显式释放
-                    torch.cuda.empty_cache()  # 清理缓存
             print("Gradient:", input_img.grad.norm())
-            print("adv loss:", adv_loss / adv_weight, "conf:", display_conf.item())
+            reverse_conf = 1.0 + 1e-6 - (10 ** ((-adv_loss / adv_weight).item()))
+            reverse_conf = max(0.0, min(1.0, reverse_conf))
+            print("adv loss:", adv_loss / adv_weight, "conf:", reverse_conf)
             print("color_loss_:", color_loss_)
             print("color_loss3:", color_loss_3 / color_weight_2356)
             print("color_loss4:", color_loss_4 / color_weight_14)

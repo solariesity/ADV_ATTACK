@@ -34,6 +34,7 @@ log/
 train_log/
 DeepPhotoStyle_pytorch/log/
 DeepPhotoStyle_pytorch/output_test/
+DeepPhotoStyle_pytorch/test_output/
 DeepPhotoStyle_pytorch/asset/gen_img/
 
 # TensorBoard event files

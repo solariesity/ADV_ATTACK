@@ -129,6 +129,10 @@ def _resolve_model_stride(model_stride):
     return int(max(model_stride, 32))
 
 
+def get_model_stride(model):
+    return _resolve_model_stride(getattr(model, "stride", 32))
+
+
 def _get_class_name(class_names, class_id):
     if isinstance(class_names, dict):
         return class_names.get(class_id, f"class_{class_id}")
@@ -309,7 +313,7 @@ def _draw_detection_boxes_pil(image, detections, class_names):
     return output
 
 
-def preprocess_input_tensor_for_yolo(input_tensor, image_size=(640, 640), stride=32, fill_color=114.0 / 255.0):
+def preprocess_input_tensor_for_yolo(input_tensor, image_size=(640, 640), stride=32, fill_color=114.0 / 255.0, interpolation_mode="bilinear"):
     """
     使用与YOLOv5官方letterbox一致的思路对输入tensor做预处理。
 
@@ -332,12 +336,13 @@ def preprocess_input_tensor_for_yolo(input_tensor, image_size=(640, 640), stride
         new_h, new_w = params["new_size"]
         left, top, right, bottom = params["padding_ltrb"]
 
-        resized = F.interpolate(
-            image_tensor.unsqueeze(0),
-            size=(new_h, new_w),
-            mode="bilinear",
-            align_corners=False,
-        ).squeeze(0)
+        interpolate_kwargs = {
+            "size": (new_h, new_w),
+            "mode": interpolation_mode,
+        }
+        if interpolation_mode in {"linear", "bilinear", "bicubic", "trilinear"}:
+            interpolate_kwargs["align_corners"] = False
+        resized = F.interpolate(image_tensor.unsqueeze(0), **interpolate_kwargs).squeeze(0)
         padded = F.pad(
             resized,
             (left, right, top, bottom),
@@ -399,7 +404,19 @@ def yolo_result_nms_official(model_output, input_tensor, image_size=(640, 640), 
     return detections_list, class_names, shape1
 
 
-def plot_detections_official(model_output, input_tensor, image_size=(640, 640), stride=32, conf_threshold=0.25, iou_threshold=0.45, class_names=None, agnostic=False, max_det=300, image_index=0):
+def plot_detections_official(
+    model_output,
+    input_tensor,
+    image_size=(640, 640),
+    stride=32,
+    conf_threshold=0.25,
+    iou_threshold=0.45,
+    class_names=None,
+    agnostic=False,
+    max_det=300,
+    image_index=0,
+    return_detections=False,
+):
     """
     使用 preprocess_input_tensor_for_yolo 对应的坐标体系，将model_output绘制回原始input_tensor。
 
@@ -439,7 +456,9 @@ def plot_detections_official(model_output, input_tensor, image_size=(640, 640), 
     image = Image.fromarray(image_np)
     detections = detections_list[image_index]
     output_image = _draw_detection_boxes_pil(image, detections, class_names)
-    return output_image, detections, class_names
+    if return_detections:
+        return output_image, detections, class_names
+    return output_image
 
 
 def detect_tensor_with_official_yolo(model, input_tensor, image_size=(640, 640), conf_threshold=None, iou_threshold=None, max_det=None):
@@ -738,7 +757,7 @@ def yolo_result_nms(model_output, input_tensor, conf_threshold=0.25, iou_thresho
     return final_boxes, final_scores, final_class_ids, class_names
 
 
-def plot_detections(model_output, input_tensor, conf_threshold=0.25, iou_threshold=0.45, class_names=None):
+def plot_detections(model_output, input_tensor, conf_threshold=0.25, iou_threshold=0.45, class_names=None, return_detections=False):
     """
     在输入图像上绘制YOLO检测结果，调用process_detections处理检测结果
 
@@ -769,6 +788,8 @@ def plot_detections(model_output, input_tensor, conf_threshold=0.25, iou_thresho
 
     # 如果没有检测到任何物体，直接返回原图
     if len(final_boxes) == 0:
+        if return_detections:
+            return image, final_boxes, final_scores, final_class_ids, class_names
         return image
 
     # 创建绘图对象
@@ -852,6 +873,8 @@ def plot_detections(model_output, input_tensor, conf_threshold=0.25, iou_thresho
             draw.rectangle([label_x1, label_y1, label_x2, label_y2], fill=color)
             draw.text((label_x1 + 2, label_y1), label, fill="white", font=font)
 
+    if return_detections:
+        return image, final_boxes, final_scores, final_class_ids, class_names
     return image
 
 

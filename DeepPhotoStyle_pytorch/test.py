@@ -84,6 +84,7 @@ if __name__ == "__main__":
     ap.add_argument("--midu-weight", "-ml", default=10000, type=float, help="midu weight")
     ap.add_argument("--color-power", "-cp", default=1, type=int, choices=[1, 2], help="Color loss power: 1=mean (default), 2=squared")
     ap.add_argument("--save-gradcam", "-sgc", default=0, type=int, choices=[0, 1], help="Save Grad-CAM images: 1=save, 0=do not save")
+    ap.add_argument("--official-yolo-tensor", "-oyt", default=0, type=int, choices=[0, 1], help="Use official-style tensor preprocess/NMS for YOLO tensor path: 1=enable, 0=disable")
 
     args = vars(ap.parse_args())
     print(str(args))

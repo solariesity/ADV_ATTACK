@@ -3,19 +3,19 @@
 
 STYLE_IMAGE="America.png"
 CONTENT_IMAGE="America.png"
-VEHICLE="HQ.png"
-PAINT_MASK="21"
-STEPS=20
+VEHICLE="BMW.png"
+PAINT_MASK="34"
+STEPS=400
 
 LABEL=(
-    "america_hq_rs0_cp2_pm21_cw14_30_cw2356_5000"
-    "america_hq_rs0_cp2_pm21_cw14_25_cw2356_4000"
-    "america_hq_rs0_cp2_pm21_cw14_20_cw2356_3000"
-    "america_hq_rs0_cp2_pm21_cw14_15_cw2356_2000"
-    "america_hq_rs0_cp2_pm21_cw14_10_cw2356_1000"
-    "america_hq_rs0_cp2_pm21_cw14_5_cw2356_300"
-    "america_hq_rs0_cp2_pm21_cw14_0_cw2356_0_repeat_1"
-    "america_hq_rs0_cp2_pm21_cw14_0_cw2356_0_repeat_2"
+    "fix_cw2356_300_cw14_20"
+    "fix_cw2356_300_cw14_22"
+    "fix_cw2356_300_cw14_25"
+    "fix_cw2356_300_cw14_27"
+    "fix_cw14_20_cw2356_300"
+    "fix_cw14_20_cw2356_200"
+    "fix_cw14_20_cw2356_100"
+    "fix_cw14_20_cw2356_50"
 )
 
 LEARNING_RATE=(0.35 0.35 0.35 0.35 0.35 0.35 0.35 0.35)
@@ -42,15 +42,15 @@ OFFICIAL_YOLO_TENSOR=1
 STYLE_WEIGHT=(0 0 0 0 0 0 0 0)
 MASK_WEIGHT=(0 0 0 0 0 0 0 0)
 REALISTIC_WEIGHT=(0 0 0 0 0 0 0 0)
-COLOR_WEIGHT=(0.01 0.01 0.01 0.01 0.01 0.01 0.01 0.01)
+COLOR_WEIGHT=(0 0 0 0 0 0 0 0)
 ORIGINAL_WEIGHT=(0 0 0 0 0 0 0 0)
 
-DEVICE=1
-COLOR_WEIGHT_14=(30 25 20 15 10 5 0 0)
-COLOR_WEIGHT_2356=(5000 4000 3000 2000 1000 300 0 0)
+DEVICE=0
+COLOR_WEIGHT_14=(20 22 25 27 20 20 20 20)
+COLOR_WEIGHT_2356=(300 300 300 300 300 200 100 50)
 
 
-LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0514/color_204_1_t/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}"
+LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0514/color_204_0_t/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}_0"
 LOG_FILE="$LOG_DIR/color_scan_${PAINT_MASK}_${STEPS}.txt"
 
 mkdir -p "$LOG_DIR"
@@ -58,7 +58,7 @@ mkdir -p "$LOG_DIR"
 echo "start" >> "$LOG_FILE"
 
 
-for i in {3,}; do
+for i in {0,}; do
     RESULT_FILE="$LOG_DIR/${LABEL[$i]}_LR_${LEARNING_RATE[$i]}_CP_${COLOR_POWER}_CW14_${COLOR_WEIGHT_14[$i]}_CW2356_${COLOR_WEIGHT_2356[$i]}_MIDU_WEIGHT_${MIDU_WEIGHT[$i]}_${i}.txt"
 
     RS_FLAG=""
@@ -146,4 +146,4 @@ for i in {3,}; do
     echo "已可视化实验 $i 的结果" >> "$LOG_FILE"
 done
 
-echo "0514 204_1 America HQ pm21 8轮扫描已完成，请检查日志目录 $LOG_DIR" >> "$LOG_FILE"
+echo "0514 0 cw14/cw2356 扫描已完成，请检查日志目录 $LOG_DIR" >> "$LOG_FILE"
