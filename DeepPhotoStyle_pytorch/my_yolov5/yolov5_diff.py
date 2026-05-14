@@ -193,9 +193,11 @@ def get_yolo_diff(
 
     class_probs = torch.softmax(pred[..., 5:], dim=-1)
     max_cls_prob, cls_idx = torch.max(class_probs, dim=-1)
+    raw_class_scores, _ = torch.max(pred[..., 5:], dim=-1)
 
     # 置信度 × 类别概率
     combined_score = conf * max_cls_prob
+    display_score = conf * raw_class_scores
 
     # -----------------------------
     # 2. 只保留 mask 内的候选框
@@ -204,6 +206,7 @@ def get_yolo_diff(
     mask = scene_obj_mask[batch_idx]
 
     valid_scores = []
+    valid_display_scores = []
     valid_confs = []
     valid_class_probs = []
 
@@ -212,6 +215,7 @@ def get_yolo_diff(
             continue
 
         valid_scores.append(combined_score[batch_idx, i])
+        valid_display_scores.append(display_score[batch_idx, i])
         valid_confs.append(conf[batch_idx, i])
         valid_class_probs.append(class_probs[batch_idx, i])
 
@@ -219,9 +223,11 @@ def get_yolo_diff(
     # 3. 无有效目标时直接返回 0
     # -----------------------------
     if len(valid_scores) == 0:
-        return torch.tensor(0.0, device=pred.device), torch.tensor(0.0, device=pred.device)
+        zero = torch.tensor(0.0, device=pred.device)
+        return zero, zero, zero
 
     valid_scores = torch.stack(valid_scores)
+    valid_display_scores = torch.stack(valid_display_scores)
     valid_confs = torch.stack(valid_confs)
     valid_class_probs = torch.stack(valid_class_probs)
 
@@ -230,6 +236,7 @@ def get_yolo_diff(
     # -----------------------------
     best_idx = torch.argmax(valid_scores)
     best_score = valid_scores[best_idx]
+    best_display_score = valid_display_scores[best_idx]
     best_conf = valid_confs[best_idx]
     best_class_prob = valid_class_probs[best_idx]
 
@@ -238,4 +245,4 @@ def get_yolo_diff(
     # -----------------------------
     loss = torch.log10(1.0 - best_conf + 1e-6) - class_lambda * best_class_prob[2]
 
-    return loss, best_score.detach()
+    return loss, best_score.detach(), best_display_score.detach()

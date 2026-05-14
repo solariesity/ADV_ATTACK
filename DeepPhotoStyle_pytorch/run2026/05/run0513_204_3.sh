@@ -1,17 +1,17 @@
 #!/bin/bash
 
 
-STYLE_IMAGE="Australia.png"
-CONTENT_IMAGE="Australia.png"
-VEHICLE="BMW.png"
-PAINT_MASK="37"
+STYLE_IMAGE="America.png"
+CONTENT_IMAGE="America.png"
+VEHICLE="HQ.png"
+PAINT_MASK="20"
 STEPS=400
 
 LABEL=(
-    "australia_cp2_cw14_15_cw2356_3000"
-    "australia_cp2_cw14_15_cw2356_2000"
-    "australia_cp2_cw14_15_cw2356_1000"
-    "australia_cp2_cw14_15_cw2356_500"
+    "america_hq_rs0_cp2_cw14_20_cw2356_3000"
+    "america_hq_rs0_cp2_cw14_15_cw2356_2000"
+    "america_hq_rs0_cp2_cw14_15_cw2356_1000"
+    "america_hq_rs0_cp2_cw14_15_cw2356_500"
 )
 
 STYLE_WEIGHT=(0 0 0 0)
@@ -32,9 +32,9 @@ STYLE_LAMBDA=2
 END_LEARNING_RATE=(0.014 0.014 0.014 0.014)
 DECAY_STEPS=0.8
 DECAY_POWER=(2 2 2 2)
-DEVICE=0
+DEVICE=1
 NPS_WEIGHT=(0.000000001 0.000000001 0.000000001 0.000000001)
-COLOR_WEIGHT_14=(15 15 15 15)
+COLOR_WEIGHT_14=(20 15 15 15)
 COLOR_WEIGHT_2356=(3000 2000 1000 500)
 ORIGINAL_WEIGHT=(0 0 0 0)
 FIXED_LOCATION=1
@@ -44,7 +44,7 @@ RANDOM_SCENE=(0 0 0 0)
 COLOR_POWER=2
 
 
-LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0513/color_204_1/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}"
+LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0513/color_204_3/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}"
 LOG_FILE="$LOG_DIR/color_scan_${PAINT_MASK}_${STEPS}.txt"
 
 mkdir -p "$LOG_DIR"
@@ -52,7 +52,7 @@ mkdir -p "$LOG_DIR"
 echo "start" >> "$LOG_FILE"
 
 
-for i in {0,1,2,3}; do
+for i in {0,}; do
     RESULT_FILE="$LOG_DIR/${LABEL[$i]}_LR_${LEARNING_RATE[$i]}_CP_${COLOR_POWER}_CW14_${COLOR_WEIGHT_14[$i]}_CW2356_${COLOR_WEIGHT_2356[$i]}_MIDU_WEIGHT_${MIDU_WEIGHT[$i]}_${i}.txt"
 
     RS_FLAG=""
@@ -138,4 +138,4 @@ for i in {0,1,2,3}; do
     echo "已可视化实验 $i 的结果" >> "$LOG_FILE"
 done
 
-echo "0513 204_1 Australia cp=2 复跑已完成，请检查日志目录 $LOG_DIR" >> "$LOG_FILE"
+echo "0513 204_3 America HQ rs0 cp=2 已完成，请检查日志目录 $LOG_DIR" >> "$LOG_FILE"

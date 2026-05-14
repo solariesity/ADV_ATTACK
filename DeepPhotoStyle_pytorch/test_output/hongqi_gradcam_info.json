@@ -1,0 +1,10 @@
+{
+  "image": "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/car/hongqi.jpg",
+  "top1_index": 751,
+  "top1_label": "racer",
+  "top1_prob": 0.09375398606061935,
+  "outputs": [
+    "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/test_output/hongqi_cam.jpg",
+    "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/test_output/hongqi_cam_b.jpg"
+  ]
+}

@@ -435,7 +435,7 @@ def get_adv_loss(
         scene_mask = scene_paint_mask if args["baseline"] == "baseline" else scene_obj_mask
 
     adv_yolo = yolo_model(adv_scene)
-    mean_depth_diff, best_conf = get_yolo_diff(adv_yolo, None, scene_obj_mask, yolo_model, class_lambda)
+    mean_depth_diff, best_conf, display_conf = get_yolo_diff(adv_yolo, None, scene_obj_mask, yolo_model, class_lambda)
 
     loss_fun = torch.nn.MSELoss()
 
@@ -451,7 +451,7 @@ def get_adv_loss(
     elif args["adv_type"] == "yolo":
         adv_loss = -mean_depth_diff
 
-    return adv_loss, mean_depth_diff, adv_scene, best_conf
+    return adv_loss, mean_depth_diff, adv_scene, best_conf, display_conf
 
 
 def get_lp_norm_loss(input_img, content_img, paint_mask):
@@ -592,7 +592,7 @@ def direction_update(
             paint_mask_temp = utils.get_mask_target(args["paint_mask"], car_mask.size(), paint_mask_init_new)
             if paint_mask_temp == None:
                 continue
-            adv_loss_temp, _, _, _ = get_adv_loss(
+            adv_loss_temp, _, _, _, _ = get_adv_loss(
                 input_img,
                 car_img,
                 scene_img,
@@ -836,17 +836,28 @@ def run_style_transfer(
                 total_midu_loss = torch.zeros(1).to(config.device0)
                 total_train_mean_diff = torch.zeros(1).to(config.device0)
                 total_best_conf = torch.tensor(0.0).to(config.device0)
+                total_display_conf = torch.tensor(0.0).to(config.device0)
 
                 # 三次eot
                 for _ in range(eot_samples):
                     transformed_scene_img = eot.apply_random_transforms(scene_img)
-                    single_adv_loss, single_train_mean_diff, adv_scene, best_conf = get_adv_loss(input_img, car_img, transformed_scene_img, paint_mask, car_mask, yolo_model_2, content_mask, args)
+                    single_adv_loss, single_train_mean_diff, adv_scene, best_conf, display_conf = get_adv_loss(
+                        input_img,
+                        car_img,
+                        transformed_scene_img,
+                        paint_mask,
+                        car_mask,
+                        yolo_model_2,
+                        content_mask,
+                        args,
+                    )
                     total_adv_loss += single_adv_loss.item()
                     total_train_mean_diff += single_train_mean_diff.item()
                     total_best_conf += best_conf.item()
+                    total_display_conf += display_conf.item()
                     t_index = 656
                     adv_scene_ = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(adv_scene[0].unsqueeze(0))
-                    mask, pred = Cam(adv_scene_, t_index, log_dir)
+                    mask, pred = Cam(adv_scene_, t_index, log_dir, save_img=args.get("save_gradcam", 0))
                     input_img.grad.zero_()
 
                     midu_loss_ = loss_midu.loss_midu_3(mask)
@@ -858,10 +869,13 @@ def run_style_transfer(
                 midu_loss = total_midu_loss / eot_samples
                 train_mean_diff = total_train_mean_diff / eot_samples
                 best_conf = total_best_conf / eot_samples
+                display_conf = total_display_conf / eot_samples
 
             else:
                 # 如果 eot_samples <= 1，则按原来的方式执行
-                adv_loss, train_mean_diff, adv_scene, best_conf = get_adv_loss(input_img, car_img, scene_img, paint_mask, car_mask, yolo_model_2, content_mask, args)
+                adv_loss, train_mean_diff, adv_scene, best_conf, display_conf = get_adv_loss(
+                    input_img, car_img, scene_img, paint_mask, car_mask, yolo_model_2, content_mask, args
+                )
 
             adv_loss *= adv_weight
             # print(input_img.shape)
@@ -969,7 +983,7 @@ def run_style_transfer(
                         tv_score.item(),
                         rl_score.item(),
                         adv_loss.item(),
-                        best_conf.item(),
+                        display_conf.item(),
                         l1_loss.item(),
                         mask_loss.item(),
                         nps_loss_.item(),
@@ -1087,7 +1101,7 @@ def run_style_transfer(
                     del adv_yolo, output_img, output_img_np  # 显式释放
                     torch.cuda.empty_cache()  # 清理缓存
             print("Gradient:", input_img.grad.norm())
-            print("adv loss:", adv_loss / adv_weight, "conf:", best_conf.item())
+            print("adv loss:", adv_loss / adv_weight, "conf:", display_conf.item())
             print("color_loss_:", color_loss_)
             print("color_loss3:", color_loss_3 / color_weight_2356)
             print("color_loss4:", color_loss_4 / color_weight_14)

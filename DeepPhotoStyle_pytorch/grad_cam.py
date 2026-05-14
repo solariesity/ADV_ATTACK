@@ -145,10 +145,13 @@ class CAM:
         model = models.resnet50(pretrained=True)
         self.grad_cam = GradCam(model=model, conv_layer="layer4", use_cuda=True)
         self.log_dir = "./"
+        self.t_index = None
+        self.save_img = 0
 
-    def __call__(self, img, index, log_dir, t_index=None):
+    def __call__(self, img, index, log_dir, t_index=None, save_img=0):
         self.log_dir = log_dir
         self.t_index = t_index
+        self.save_img = save_img
         img = img.to(config.device0)
         img = img / 255
         raw_img = img.data.cpu().numpy()[0].transpose((1, 2, 0))
@@ -236,14 +239,12 @@ class CAM:
             heatmap = np.transpose(heatmap, (1, 0, 2))
         cam = np.float32(img) + heatmap
         cam = cam / np.max(cam)
-        if self.t_index == None:
-            Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam.jpg"))
-            Image.fromarray(np.uint8(255 * mask)).save(os.path.join(self.log_dir, "cam_b.jpg"))
-            pass
-
-        else:
-            Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam_" + str(self.t_index) + ".jpg"))
-            pass
+        if int(self.save_img) == 1:
+            if self.t_index == None:
+                Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam.jpg"))
+                Image.fromarray(np.uint8(255 * mask)).save(os.path.join(self.log_dir, "cam_b.jpg"))
+            else:
+                Image.fromarray(np.uint8(255 * cam)).save(os.path.join(self.log_dir, "cam_" + str(self.t_index) + ".jpg"))
         # Image.fromarray(np.uint8(255 * cam_pure)).save(os.path.join(self.log_dir, "cam_p.jpg"))
 
         # cv2.imwrite("cam.jpg", np.uint8(255 * cam))

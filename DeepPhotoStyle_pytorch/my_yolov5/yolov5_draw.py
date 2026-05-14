@@ -12,6 +12,8 @@ PARENT_DIR = os.path.dirname(CURRENT_DIR)
 if PARENT_DIR not in sys.path:
     sys.path.append(PARENT_DIR)
 
+YOLOV5_SOURCE_PATH = os.path.expanduser("~/.cache/torch/hub/ultralytics_yolov5_master")
+
 import config
 
 
@@ -108,6 +110,424 @@ def tensor_preprocess_for_yolov5(
     batch_tensor = torch.stack(processed_images).to(config.device0)  # [B, C, H, W]
 
     return batch_tensor
+
+
+def _ensure_yolov5_utils_path():
+    if YOLOV5_SOURCE_PATH not in sys.path:
+        sys.path.append(YOLOV5_SOURCE_PATH)
+
+
+def _make_divisible(value, divisor):
+    return int(np.ceil(value / divisor) * divisor)
+
+
+def _resolve_model_stride(model_stride):
+    if isinstance(model_stride, torch.Tensor):
+        return int(max(model_stride.max().item(), 32))
+    if isinstance(model_stride, (list, tuple)):
+        return int(max(max(model_stride), 32))
+    return int(max(model_stride, 32))
+
+
+def _get_class_name(class_names, class_id):
+    if isinstance(class_names, dict):
+        return class_names.get(class_id, f"class_{class_id}")
+    if isinstance(class_names, (list, tuple)) and class_id < len(class_names):
+        return class_names[class_id]
+    return f"class_{class_id}"
+
+
+def _default_class_names():
+    return [
+        "person",
+        "bicycle",
+        "car",
+        "motorcycle",
+        "airplane",
+        "bus",
+        "train",
+        "truck",
+        "boat",
+        "traffic light",
+        "fire hydrant",
+        "stop sign",
+        "parking meter",
+        "bench",
+        "bird",
+        "cat",
+        "dog",
+        "horse",
+        "sheep",
+        "cow",
+        "elephant",
+        "bear",
+        "zebra",
+        "giraffe",
+        "backpack",
+        "umbrella",
+        "handbag",
+        "tie",
+        "suitcase",
+        "frisbee",
+        "skis",
+        "snowboard",
+        "sports ball",
+        "kite",
+        "baseball bat",
+        "baseball glove",
+        "skateboard",
+        "surfboard",
+        "tennis racket",
+        "bottle",
+        "wine glass",
+        "cup",
+        "fork",
+        "knife",
+        "spoon",
+        "bowl",
+        "banana",
+        "apple",
+        "sandwich",
+        "orange",
+        "broccoli",
+        "carrot",
+        "hot dog",
+        "pizza",
+        "donut",
+        "cake",
+        "chair",
+        "couch",
+        "potted plant",
+        "bed",
+        "dining table",
+        "toilet",
+        "tv",
+        "laptop",
+        "mouse",
+        "remote",
+        "keyboard",
+        "cell phone",
+        "microwave",
+        "oven",
+        "toaster",
+        "sink",
+        "refrigerator",
+        "book",
+        "clock",
+        "vase",
+        "scissors",
+        "teddy bear",
+        "hair drier",
+        "toothbrush",
+    ]
+
+
+def _compute_official_letterbox_params(input_tensor, image_size=(640, 640), stride=32):
+    if input_tensor.ndim != 4:
+        raise ValueError(f"input_tensor must be 4D [B, C, H, W], got {tuple(input_tensor.shape)}")
+
+    shape0 = [tuple(int(x) for x in sample.shape[1:]) for sample in input_tensor]
+    gain_shapes = []
+    for shape in shape0:
+        gain = max(image_size) / max(shape)
+        gain_shapes.append([int(y * gain) for y in shape])
+    shape1 = [_make_divisible(x, stride) for x in np.array(gain_shapes).max(0)]
+
+    transform_params = []
+    for shape in shape0:
+        gain = min(shape1[0] / shape[0], shape1[1] / shape[1])
+        new_h = int(round(shape[0] * gain))
+        new_w = int(round(shape[1] * gain))
+        pad_w = shape1[1] - new_w
+        pad_h = shape1[0] - new_h
+        left = int(round(pad_w / 2 - 0.1))
+        right = int(round(pad_w / 2 + 0.1))
+        top = int(round(pad_h / 2 - 0.1))
+        bottom = int(round(pad_h / 2 + 0.1))
+        transform_params.append(
+            {
+                "orig_size": shape,
+                "shape1": tuple(shape1),
+                "ratio": (gain, gain),
+                "pad": (pad_w / 2, pad_h / 2),
+                "padding_ltrb": (left, top, right, bottom),
+                "new_size": (new_h, new_w),
+            }
+        )
+
+    return shape0, tuple(shape1), transform_params
+
+
+def _draw_detection_boxes_pil(image, detections, class_names):
+    output = image.copy()
+    draw = ImageDraw.Draw(output)
+
+    try:
+        font = ImageFont.truetype("arial.ttf", 16)
+    except Exception:
+        font = ImageFont.load_default()
+
+    colors = [
+        (255, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (255, 255, 0),
+        (255, 0, 255),
+        (0, 255, 255),
+        (255, 128, 0),
+        (128, 255, 0),
+        (0, 128, 255),
+    ]
+
+    if detections is None or len(detections) == 0:
+        return output
+
+    for det in detections:
+        x1, y1, x2, y2, conf, cls = det.tolist()
+        class_id = int(cls)
+        class_name = _get_class_name(class_names, class_id)
+        color = colors[class_id % len(colors)]
+
+        x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+        draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+
+        label = f"{class_name} {conf:.2f}"
+        try:
+            text_bbox = draw.textbbox((0, 0), label, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+        except Exception:
+            text_width, text_height = draw.textsize(label, font=font)
+
+        label_x1 = x1
+        label_y1 = max(0, y1 - text_height - 4)
+        label_x2 = x1 + text_width + 4
+        label_y2 = label_y1 + text_height + 4
+        draw.rectangle([label_x1, label_y1, label_x2, label_y2], fill=color)
+        draw.text((label_x1 + 2, label_y1 + 1), label, fill="white", font=font)
+
+    return output
+
+
+def preprocess_input_tensor_for_yolo(input_tensor, image_size=(640, 640), stride=32, fill_color=114.0 / 255.0):
+    """
+    使用与YOLOv5官方letterbox一致的思路对输入tensor做预处理。
+
+    参数:
+        input_tensor: [B, C, H, W]，值范围[0, 1]
+        image_size: 推理尺寸上限，默认(640, 640)
+        stride: YOLO stride，默认32
+        fill_color: pad填充值，默认114/255
+
+    返回:
+        tuple: (preprocessed_tensor, transform_params)
+        - preprocessed_tensor: 预处理后的tensor，可直接送入model
+        - transform_params: 每张图像的缩放与padding参数
+    """
+    _, shape1, transform_params = _compute_official_letterbox_params(input_tensor, image_size=image_size, stride=stride)
+
+    processed_images = []
+    target_h, target_w = shape1
+    for image_tensor, params in zip(input_tensor, transform_params):
+        new_h, new_w = params["new_size"]
+        left, top, right, bottom = params["padding_ltrb"]
+
+        resized = F.interpolate(
+            image_tensor.unsqueeze(0),
+            size=(new_h, new_w),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0)
+        padded = F.pad(
+            resized,
+            (left, right, top, bottom),
+            mode="constant",
+            value=fill_color,
+        )
+        if padded.shape[1] != target_h or padded.shape[2] != target_w:
+            raise RuntimeError(
+                f"Unexpected padded tensor shape {tuple(padded.shape)} for target {(target_h, target_w)}"
+            )
+        processed_images.append(padded)
+
+    preprocessed_tensor = torch.stack(processed_images).to(input_tensor.device, input_tensor.dtype)
+    return preprocessed_tensor, transform_params
+
+
+def yolo_result_nms_official(model_output, input_tensor, image_size=(640, 640), stride=32, conf_threshold=0.25, iou_threshold=0.45, class_names=None, agnostic=False, max_det=300):
+    """
+    对预处理后的model_output做官方风格NMS，并把框映射回原始input_tensor坐标。
+
+    参数:
+        model_output: model(preprocessed_tensor)的输出
+        input_tensor: 原始输入tensor，[B, C, H, W]
+        image_size: 与preprocess_input_tensor_for_yolo一致的推理尺寸
+        stride: 与preprocess_input_tensor_for_yolo一致的stride
+        conf_threshold: 置信度阈值
+        iou_threshold: NMS阈值
+        class_names: 类别名称
+        agnostic: 是否类别无关NMS
+        max_det: 最大检测框数
+
+    返回:
+        tuple: (detections_list, class_names, preprocessed_shape)
+        - detections_list: 长度为B的list，每项是[N, 6]张量，格式为xyxy/conf/cls
+        - class_names: 类别名称
+        - preprocessed_shape: preprocess后的tensor空间尺寸(H, W)
+    """
+    _ensure_yolov5_utils_path()
+    from utils.general import non_max_suppression, scale_boxes
+
+    shape0, shape1, _ = _compute_official_letterbox_params(input_tensor, image_size=image_size, stride=stride)
+    detections_list = non_max_suppression(
+        model_output,
+        conf_thres=conf_threshold,
+        iou_thres=iou_threshold,
+        agnostic=agnostic,
+        max_det=max_det,
+    )
+
+    for i, detections in enumerate(detections_list):
+        if len(detections) > 0:
+            detections = detections.clone()
+            scale_boxes(shape1, detections[:, :4], shape0[i])
+            detections[:, :4] = detections[:, :4].round()
+            detections_list[i] = detections
+
+    if class_names is None:
+        class_names = _default_class_names()
+    return detections_list, class_names, shape1
+
+
+def plot_detections_official(model_output, input_tensor, image_size=(640, 640), stride=32, conf_threshold=0.25, iou_threshold=0.45, class_names=None, agnostic=False, max_det=300, image_index=0):
+    """
+    使用 preprocess_input_tensor_for_yolo 对应的坐标体系，将model_output绘制回原始input_tensor。
+
+    参数:
+        model_output: model(preprocessed_tensor)的输出
+        input_tensor: 原始输入tensor，[B, C, H, W]
+        image_size: 与preprocess_input_tensor_for_yolo一致的推理尺寸
+        stride: 与preprocess_input_tensor_for_yolo一致的stride
+        conf_threshold: 置信度阈值
+        iou_threshold: NMS阈值
+        class_names: 类别名称
+        agnostic: 是否类别无关NMS
+        max_det: 最大检测框数
+        image_index: 要绘制的batch索引
+
+    返回:
+        tuple: (output_image, detections, class_names)
+    """
+    detections_list, class_names, _ = yolo_result_nms_official(
+        model_output,
+        input_tensor,
+        image_size=image_size,
+        stride=stride,
+        conf_threshold=conf_threshold,
+        iou_threshold=iou_threshold,
+        class_names=class_names,
+        agnostic=agnostic,
+        max_det=max_det,
+    )
+
+    if image_index < 0 or image_index >= input_tensor.shape[0]:
+        raise IndexError(f"image_index {image_index} out of range for batch size {input_tensor.shape[0]}")
+
+    image_np = input_tensor[image_index].detach().cpu().permute(1, 2, 0).numpy()
+    image_np = np.clip(image_np, 0, 1)
+    image_np = (image_np * 255).astype(np.uint8)
+    image = Image.fromarray(image_np)
+    detections = detections_list[image_index]
+    output_image = _draw_detection_boxes_pil(image, detections, class_names)
+    return output_image, detections, class_names
+
+
+def detect_tensor_with_official_yolo(model, input_tensor, image_size=(640, 640), conf_threshold=None, iou_threshold=None, max_det=None):
+    """
+    使用YOLOv5官方风格的letterbox + NMS流程处理输入tensor。
+
+    参数:
+        model: import_yolov5s_model_2加载的YOLO模型
+        input_tensor: [B, C, H, W]，值范围[0, 1]
+        image_size: 推理尺寸，默认(640, 640)
+        conf_threshold: 置信度阈值，默认读取model.conf
+        iou_threshold: NMS阈值，默认读取model.iou或0.45
+        max_det: 最大检测框数量，默认读取model.max_det或300
+
+    返回:
+        tuple: (preprocessed_tensor, detections_list, class_names)
+        - preprocessed_tensor: 送入模型的letterbox后tensor
+        - detections_list: 长度为B的list，每项是[N, 6]张量，格式为xyxy/conf/cls，坐标已映射回原图
+        - class_names: 类别名称
+    """
+    if input_tensor.ndim != 4:
+        raise ValueError(f"input_tensor must be 4D [B, C, H, W], got {tuple(input_tensor.shape)}")
+
+    model_stride = getattr(model, "stride", 32)
+    stride = _resolve_model_stride(model_stride)
+    conf_thres = float(getattr(model, "conf", 0.1) if conf_threshold is None else conf_threshold)
+    iou_thres = float(getattr(model, "iou", 0.45) if iou_threshold is None else iou_threshold)
+    max_det = int(getattr(model, "max_det", 300) if max_det is None else max_det)
+    agnostic = bool(getattr(model, "agnostic", False))
+    class_names = getattr(model, "names", {})
+
+    preprocessed_tensor, _ = preprocess_input_tensor_for_yolo(input_tensor, image_size=image_size, stride=stride)
+    model_device = next(model.parameters()).device
+    model_dtype = next(model.parameters()).dtype
+    preprocessed_tensor = preprocessed_tensor.to(model_device).type(model_dtype)
+
+    with torch.no_grad():
+        raw_output = model(preprocessed_tensor)
+    detections_list, class_names, _ = yolo_result_nms_official(
+        raw_output,
+        input_tensor,
+        image_size=image_size,
+        stride=stride,
+        conf_threshold=conf_thres,
+        iou_threshold=iou_thres,
+        class_names=class_names,
+        agnostic=agnostic,
+        max_det=max_det,
+    )
+
+    return preprocessed_tensor, detections_list, class_names
+
+
+def plot_detections_official_tensor(model, input_tensor, image_size=(640, 640), conf_threshold=None, iou_threshold=None, max_det=None, image_index=0):
+    """
+    使用YOLOv5官方风格流程对输入tensor做检测，并返回指定图像的绘制结果。
+
+    参数:
+        model: import_yolov5s_model_2加载的YOLO模型
+        input_tensor: [B, C, H, W]，值范围[0, 1]
+        image_size: 推理尺寸，默认(640, 640)
+        conf_threshold: 置信度阈值
+        iou_threshold: NMS阈值
+        max_det: 最大检测框数量
+        image_index: 要可视化的batch索引
+
+    返回:
+        tuple: (PIL图像, detections, class_names, preprocessed_tensor)
+    """
+    preprocessed_tensor, detections_list, class_names = detect_tensor_with_official_yolo(
+        model,
+        input_tensor,
+        image_size=image_size,
+        conf_threshold=conf_threshold,
+        iou_threshold=iou_threshold,
+        max_det=max_det,
+    )
+
+    if image_index < 0 or image_index >= input_tensor.shape[0]:
+        raise IndexError(f"image_index {image_index} out of range for batch size {input_tensor.shape[0]}")
+
+    image_np = input_tensor[image_index].detach().cpu().permute(1, 2, 0).numpy()
+    image_np = np.clip(image_np, 0, 1)
+    image_np = (image_np * 255).astype(np.uint8)
+    image = Image.fromarray(image_np)
+    detections = detections_list[image_index]
+    output_image = _draw_detection_boxes_pil(image, detections, class_names)
+    return output_image, detections, class_names, preprocessed_tensor
 
 
 def print_xywh_elements(model_output, input_name, num_elements=10000):

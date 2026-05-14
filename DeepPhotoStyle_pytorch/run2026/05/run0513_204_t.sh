@@ -1,17 +1,17 @@
 #!/bin/bash
 
 
-STYLE_IMAGE="Australia.png"
-CONTENT_IMAGE="Australia.png"
+STYLE_IMAGE="America.png"
+CONTENT_IMAGE="America.png"
 VEHICLE="HQ.png"
 PAINT_MASK="20"
-STEPS=20
+STEPS=400
 
 LABEL=(
-    "australia_hq_cp2_cw14_15_cw2356_3000"
-    "australia_hq_cp2_cw14_15_cw2356_2000"
-    "australia_hq_cp2_cw14_15_cw2356_1000"
-    "australia_hq_cp2_cw14_15_cw2356_500"
+    "america_hq_cp2_cw14_20_cw2356_3000"
+    "america_hq_cp2_cw14_15_cw2356_2000"
+    "america_hq_cp2_cw14_15_cw2356_1000"
+    "america_hq_cp2_cw14_15_cw2356_500"
 )
 
 STYLE_WEIGHT=(0 0 0 0)
@@ -32,19 +32,19 @@ STYLE_LAMBDA=2
 END_LEARNING_RATE=(0.014 0.014 0.014 0.014)
 DECAY_STEPS=0.8
 DECAY_POWER=(2 2 2 2)
-DEVICE=0
+DEVICE=1
 NPS_WEIGHT=(0.000000001 0.000000001 0.000000001 0.000000001)
-COLOR_WEIGHT_14=(15 15 15 15)
+COLOR_WEIGHT_14=(20 15 15 15)
 COLOR_WEIGHT_2356=(3000 2000 1000 500)
 ORIGINAL_WEIGHT=(0 0 0 0)
 FIXED_LOCATION=1
 CLASS_LAMBDA=(0.0000000001 0.0000000001 0.0000000001 0.0000000001)
 MIDU_WEIGHT=(50 50 50 50)
-RANDOM_SCENE=(1 1 1 1)
+RANDOM_SCENE=(0 0 0 0)
 COLOR_POWER=2
 
 
-LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0513/color_204_t/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}"
+LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0513/color_204_t2/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}"
 LOG_FILE="$LOG_DIR/color_scan_${PAINT_MASK}_${STEPS}.txt"
 
 mkdir -p "$LOG_DIR"

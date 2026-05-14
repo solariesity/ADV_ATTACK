@@ -1,0 +1,10 @@
+{
+  "image": "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/asset/src_img/car/HQ.png",
+  "top1_index": 751,
+  "top1_label": "racer",
+  "top1_prob": 0.30484282970428467,
+  "outputs": [
+    "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/test_output/cam.jpg",
+    "/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/test_output/cam_b.jpg"
+  ]
+}

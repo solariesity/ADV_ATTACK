@@ -72,7 +72,7 @@ def create_mask(output_path, width=1563, height=1355, channels=1, foreground_val
 
 if __name__ == "__main__":
     target = "BMW"
-    mask_no = 20
+    mask_no = 21
 
     # left = 630
     # top = 660
@@ -81,10 +81,10 @@ if __name__ == "__main__":
 
     # HQ 示例参数
     target = "HQ"
-    left = 192
-    top = 325
-    right = 481
-    bottom = 457
+    left = 132
+    top = 345
+    right = 441
+    bottom = 497
 
     size_map = {
         "BMW": (1563, 1355),
