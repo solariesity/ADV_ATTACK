@@ -81,6 +81,69 @@ def bbox_intersects_mask(bbox, mask):
         return False
 
     area_ratio = det_area / mask_area
+    return area_ratio >= 0
+
+
+def get_mask_filter_stats(mask, margin=50):
+    """
+    预计算与 mask 相关、且在候选框循环中保持不变的筛选信息。
+
+    返回:
+        dict | None:
+        - exp_x1, exp_y1, exp_x2, exp_y2: 扩展框边界
+        - mask_area: mask 像素面积
+        若 mask 为空则返回 None
+    """
+    if mask.dim() == 3:
+        mask_2d = mask.sum(dim=0) > 0
+        h, w = mask.shape[1], mask.shape[2]
+    else:
+        mask_2d = mask > 0
+        h, w = mask.shape
+
+    ys, xs = torch.nonzero(mask_2d, as_tuple=True)
+    if ys.numel() == 0 or xs.numel() == 0:
+        return None
+
+    mask_x1 = int(xs.min().item())
+    mask_y1 = int(ys.min().item())
+    mask_x2 = int(xs.max().item()) + 1
+    mask_y2 = int(ys.max().item()) + 1
+
+    exp_x1 = max(0, mask_x1 - margin)
+    exp_y1 = max(0, mask_y1 - margin)
+    exp_x2 = min(w, mask_x2 + margin)
+    exp_y2 = min(h, mask_y2 + margin)
+
+    mask_area = int(mask_2d.sum().item())
+    if mask_area == 0:
+        return None
+
+    return {
+        "exp_x1": exp_x1,
+        "exp_y1": exp_y1,
+        "exp_x2": exp_x2,
+        "exp_y2": exp_y2,
+        "mask_area": mask_area,
+    }
+
+
+def bbox_intersects_mask_with_stats(bbox, mask_stats):
+    """
+    使用预计算的 mask 统计信息筛选候选检测框。
+    """
+    x1, y1, x2, y2 = bbox.int().tolist()
+
+    if x1 < mask_stats["exp_x1"] or y1 < mask_stats["exp_y1"] or x2 > mask_stats["exp_x2"] or y2 > mask_stats["exp_y2"]:
+        return False
+
+    det_w = max(0, x2 - x1)
+    det_h = max(0, y2 - y1)
+    if det_w == 0 or det_h == 0:
+        return False
+
+    det_area = det_w * det_h
+    area_ratio = det_area / mask_stats["mask_area"]
     return area_ratio >= 0.5
 
 
@@ -220,29 +283,41 @@ def get_yolo_diff(
     # -----------------------------
     batch_idx = 0
     mask = scene_obj_mask[batch_idx]
+    mask_stats = get_mask_filter_stats(mask)
+    if mask_stats is None:
+        zero = pred.sum() * 0.0
+        return zero
 
-    valid_scores = []
-    valid_confs = []
-    valid_class_probs = []
+    boxes = xyxy[batch_idx]  # [N, 4]
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
 
-    for i in range(pred.shape[1]):
-        if not bbox_intersects_mask(xyxy[batch_idx, i], mask):
-            continue
+    det_w = (x2 - x1).clamp(min=0)
+    det_h = (y2 - y1).clamp(min=0)
+    det_area = det_w * det_h
 
-        valid_scores.append(combined_score[batch_idx, i])
-        valid_confs.append(conf[batch_idx, i])
-        valid_class_probs.append(class_probs[batch_idx, i])
+    valid_mask = (
+        (x1 >= mask_stats["exp_x1"])
+        & (y1 >= mask_stats["exp_y1"])
+        & (x2 <= mask_stats["exp_x2"])
+        & (y2 <= mask_stats["exp_y2"])
+        & (det_w > 0)
+        & (det_h > 0)
+        & ((det_area / mask_stats["mask_area"]) >= 0)
+    )
 
     # -----------------------------
     # 3. 无有效目标时直接返回 0
     # -----------------------------
-    if len(valid_scores) == 0:
+    if not valid_mask.any():
         zero = pred.sum() * 0.0
         return zero
 
-    valid_scores = torch.stack(valid_scores)
-    valid_confs = torch.stack(valid_confs)
-    valid_class_probs = torch.stack(valid_class_probs)
+    valid_scores = combined_score[batch_idx][valid_mask]
+    valid_confs = conf[batch_idx][valid_mask]
+    valid_class_probs = class_probs[batch_idx][valid_mask]
 
     # -----------------------------
     # 4. 选取得分最高的目标
