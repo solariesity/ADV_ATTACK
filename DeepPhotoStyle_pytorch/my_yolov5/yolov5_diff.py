@@ -31,37 +31,57 @@ def batch_xywh2xyxy(xywh):
 
 def bbox_intersects_mask(bbox, mask):
     """
-    检查边界框扩大10像素后是否与掩码有交集，并检测边界是否全为0
+    基于 mask 的外接框筛选候选检测框。
+
+    规则：
+    1. 计算 mask 的最小外接框，并向四周扩展 50 像素；
+    2. 仅保留完全落在该扩展框内部的检测框；
+    3. 检测框面积至少占 mask 面积的 50%。
+
     参数:
         bbox: [x1, y1, x2, y2]（像素坐标）
-        mask: [C, H, W]的掩码
+        mask: [C, H, W] 或 [H, W] 的掩码
     返回:
-        bool: 当且仅当满足以下条件时返回True:
-              a) 扩大后的区域与掩码有交集
-              b) 扩大后的区域边界全为0
+        bool: 满足筛选条件时返回 True
     """
     x1, y1, x2, y2 = bbox.int().tolist()
-    h, w = mask.shape[1], mask.shape[2]
+    if mask.dim() == 3:
+        mask_2d = mask.sum(dim=0) > 0
+        h, w = mask.shape[1], mask.shape[2]
+    else:
+        mask_2d = mask > 0
+        h, w = mask.shape
 
-    # 扩大10像素（确保不超出图像边界）
-    x1_exp = max(0, x1 - 50)
-    y1_exp = max(0, y1 - 50)
-    x2_exp = min(w, x2 + 50)
-    y2_exp = min(h, y2 + 50)
-
-    mask_area = mask[:, y1_exp:y2_exp, x1_exp:x2_exp]
-
-    # 检查是否有交集
-    if mask_area.sum() == 0:
+    ys, xs = torch.nonzero(mask_2d, as_tuple=True)
+    if ys.numel() == 0 or xs.numel() == 0:
         return False
 
-    # # 检查边界是否有1（仅当区域非空时）
-    # if mask_area.numel() == 0:
-    #     return True
+    mask_x1 = int(xs.min().item())
+    mask_y1 = int(ys.min().item())
+    mask_x2 = int(xs.max().item()) + 1
+    mask_y2 = int(ys.max().item()) + 1
 
-    # 检查四条边界
-    has_boundary_1 = mask_area[:, 0, :].sum() > 0 or mask_area[:, -1, :].sum() > 0 or mask_area[:, :, 0].sum() > 0 or mask_area[:, :, -1].sum() > 0  # 上边界  # 下边界  # 左边界  # 右边界
-    return not has_boundary_1
+    margin = 50
+    exp_x1 = max(0, mask_x1 - margin)
+    exp_y1 = max(0, mask_y1 - margin)
+    exp_x2 = min(w, mask_x2 + margin)
+    exp_y2 = min(h, mask_y2 + margin)
+
+    if x1 < exp_x1 or y1 < exp_y1 or x2 > exp_x2 or y2 > exp_y2:
+        return False
+
+    det_w = max(0, x2 - x1)
+    det_h = max(0, y2 - y1)
+    if det_w == 0 or det_h == 0:
+        return False
+
+    det_area = det_w * det_h
+    mask_area = int(mask_2d.sum().item())
+    if mask_area == 0:
+        return False
+
+    area_ratio = det_area / mask_area
+    return area_ratio >= 0.5
 
 
 def resize_mask(mask: torch.Tensor, target_size: Tuple[int, int] = (640, 640), fill_value: int = 0) -> Tuple[torch.Tensor, List[Dict]]:
@@ -182,7 +202,6 @@ def get_yolo_diff(
     返回:
         标量 loss（可反向传播）
     """
-
     # -----------------------------
     # 1. 解析 YOLO 输出
     # -----------------------------
@@ -193,11 +212,8 @@ def get_yolo_diff(
 
     class_probs = torch.softmax(pred[..., 5:], dim=-1)
     max_cls_prob, cls_idx = torch.max(class_probs, dim=-1)
-    raw_class_scores, _ = torch.max(pred[..., 5:], dim=-1)
-
     # 置信度 × 类别概率
     combined_score = conf * max_cls_prob
-    display_score = conf * raw_class_scores
 
     # -----------------------------
     # 2. 只保留 mask 内的候选框
@@ -206,7 +222,6 @@ def get_yolo_diff(
     mask = scene_obj_mask[batch_idx]
 
     valid_scores = []
-    valid_display_scores = []
     valid_confs = []
     valid_class_probs = []
 
@@ -215,7 +230,6 @@ def get_yolo_diff(
             continue
 
         valid_scores.append(combined_score[batch_idx, i])
-        valid_display_scores.append(display_score[batch_idx, i])
         valid_confs.append(conf[batch_idx, i])
         valid_class_probs.append(class_probs[batch_idx, i])
 
@@ -223,11 +237,10 @@ def get_yolo_diff(
     # 3. 无有效目标时直接返回 0
     # -----------------------------
     if len(valid_scores) == 0:
-        zero = torch.tensor(0.0, device=pred.device)
-        return zero, zero
+        zero = pred.sum() * 0.0
+        return zero
 
     valid_scores = torch.stack(valid_scores)
-    valid_display_scores = torch.stack(valid_display_scores)
     valid_confs = torch.stack(valid_confs)
     valid_class_probs = torch.stack(valid_class_probs)
 
@@ -235,7 +248,6 @@ def get_yolo_diff(
     # 4. 选取得分最高的目标
     # -----------------------------
     best_idx = torch.argmax(valid_scores)
-    best_display_score = valid_display_scores[best_idx]
     best_conf = valid_confs[best_idx]
     best_class_prob = valid_class_probs[best_idx]
 
@@ -244,4 +256,4 @@ def get_yolo_diff(
     # -----------------------------
     loss = torch.log10(1.0 - best_conf + 1e-6) - class_lambda * best_class_prob[2]
 
-    return loss, best_display_score.detach()
+    return loss

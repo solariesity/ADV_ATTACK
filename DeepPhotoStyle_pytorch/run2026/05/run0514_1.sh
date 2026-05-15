@@ -3,19 +3,20 @@
 
 STYLE_IMAGE="America.png"
 CONTENT_IMAGE="America.png"
-VEHICLE="BMW.png"
-PAINT_MASK="34"
+VEHICLE="HQ.png"
+PAINT_MASK="21"
 STEPS=400
 
-LABEL=(
-    "fix_cw2356_300_cw14_20"
-    "fix_cw2356_300_cw14_22"
-    "fix_cw2356_300_cw14_25"
-    "fix_cw2356_300_cw14_27"
-    "fix_cw14_20_cw2356_300"
-    "fix_cw14_20_cw2356_200"
-    "fix_cw14_20_cw2356_100"
-    "fix_cw14_20_cw2356_50"
+LABEL_PREFIX="america_hq_pm21"
+LABEL_PARAM=(
+    "cw14_0_cw2356_0"
+    "cw14_0_cw2356_0"
+    "cw14_0_cw2356_0"
+    "cw14_0_cw2356_0"
+    "cw14_0_cw2356_0"
+    "cw14_0_cw2356_0"
+    "cw14_0_cw2356_0"
+    "cw14_0_cw2356_0"
 )
 
 LEARNING_RATE=(0.35 0.35 0.35 0.35 0.35 0.35 0.35 0.35)
@@ -45,13 +46,15 @@ REALISTIC_WEIGHT=(0 0 0 0 0 0 0 0)
 COLOR_WEIGHT=(0 0 0 0 0 0 0 0)
 ORIGINAL_WEIGHT=(0 0 0 0 0 0 0 0)
 
-DEVICE=0
+DEVICE=1
 # COLOR_WEIGHT_14=(20 22 25 27 20 20 20 20)
 # COLOR_WEIGHT_2356=(300 300 300 300 300 200 100 50)
 COLOR_WEIGHT_14=(0 0 0 0 0 0 0 0)
 COLOR_WEIGHT_2356=(0 0 0 0 0 0 0 0)
 
-LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0514/color_204_0_t/color_scan_${CONTENT_IMAGE}_${STYLE_IMAGE}_${PAINT_MASK}_0"
+CONTENT_TAG="${CONTENT_IMAGE%.*}"
+EXPERIMENT_TAG="cw0"
+LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0514/${EXPERIMENT_TAG}/${CONTENT_TAG}_pm${PAINT_MASK}"
 LOG_FILE="$LOG_DIR/color_scan_${PAINT_MASK}_${STEPS}.txt"
 
 mkdir -p "$LOG_DIR"
@@ -60,7 +63,7 @@ echo "start" >> "$LOG_FILE"
 
 
 for i in {0,}; do
-    RESULT_FILE="$LOG_DIR/${LABEL[$i]}_LR_${LEARNING_RATE[$i]}_CP_${COLOR_POWER}_CW14_${COLOR_WEIGHT_14[$i]}_CW2356_${COLOR_WEIGHT_2356[$i]}_MIDU_WEIGHT_${MIDU_WEIGHT[$i]}_${i}.txt"
+    RESULT_FILE="$LOG_DIR/${i}_${LABEL_PREFIX}_${LABEL_PARAM[$i]}.txt"
 
     RS_FLAG=""
     if [ "${RANDOM_SCENE[$i]}" == "1" ]; then
