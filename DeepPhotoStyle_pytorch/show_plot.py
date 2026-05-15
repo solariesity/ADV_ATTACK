@@ -54,6 +54,16 @@ MODE_CONFIG = {
         "output_suffix": "_total.png",
         "extract_message": "total loss values",
     },
+    "color34": {
+        "patterns": {
+            "color_loss3": r"color_loss3: tensor\(\[?(\d+(?:\.\d+)?)",
+            "color_loss4": r"color_loss4: tensor\(\[?(\d+(?:\.\d+)?)",
+        },
+        "title": "Color Loss 3 and 4 Over Steps",
+        "ylabel": "Loss Value",
+        "output_suffix": "_color34.png",
+        "extract_message": "color_loss3/color_loss4 values",
+    },
     "score": {
         "pattern": r"max_combined_score: tensor\((\d+\.\d+)",
         "label": "max_combined_score",
@@ -72,6 +82,17 @@ def extract_values(file_path, pattern):
 
     scores = re.findall(pattern, log_content)
     return [float(score) for score in scores]
+
+
+def extract_multi_values(file_path, patterns):
+    with open(file_path, "r") as file:
+        log_content = file.read()
+
+    extracted = {}
+    for label, pattern in patterns.items():
+        values = re.findall(pattern, log_content)
+        extracted[label] = [float(value) for value in values]
+    return extracted
 
 
 def build_output_path(input_file, output_suffix):
@@ -98,6 +119,28 @@ def plot_and_save_scores(scores, output_path, config):
     plt.close()
 
 
+def plot_and_save_multi_scores(score_map, output_path, config):
+    plt.figure(figsize=(12, 6))
+
+    colors = {
+        "color_loss3": "tab:blue",
+        "color_loss4": "tab:orange",
+    }
+
+    for label, values in score_map.items():
+        plt.plot(values, linewidth=2, label=label, color=colors.get(label))
+
+    plt.title(config["title"])
+    plt.xlabel("Step")
+    plt.ylabel(config["ylabel"])
+    plt.legend()
+    plt.grid(True)
+
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"Plot saved to {output_path}")
+    plt.close()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot different metrics from a log file"
@@ -113,10 +156,15 @@ def main():
 
     config = MODE_CONFIG[args.mode]
     output_path = build_output_path(args.input_file, config["output_suffix"])
-    scores = extract_values(args.input_file, config["pattern"])
-
-    print(f"Extracted {len(scores)} {config['extract_message']}")
-    plot_and_save_scores(scores, output_path, config)
+    if "patterns" in config:
+        score_map = extract_multi_values(args.input_file, config["patterns"])
+        extracted_counts = ", ".join(f"{label}={len(values)}" for label, values in score_map.items())
+        print(f"Extracted {config['extract_message']}: {extracted_counts}")
+        plot_and_save_multi_scores(score_map, output_path, config)
+    else:
+        scores = extract_values(args.input_file, config["pattern"])
+        print(f"Extracted {len(scores)} {config['extract_message']}")
+        plot_and_save_scores(scores, output_path, config)
 
 
 if __name__ == "__main__":

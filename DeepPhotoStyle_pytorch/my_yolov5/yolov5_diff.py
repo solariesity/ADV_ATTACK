@@ -305,7 +305,7 @@ def get_yolo_diff(
         & (y2 <= mask_stats["exp_y2"])
         & (det_w > 0)
         & (det_h > 0)
-        & ((det_area / mask_stats["mask_area"]) >= 0)
+        & ((det_area / mask_stats["mask_area"]) >= 0.5)
     )
 
     # -----------------------------
@@ -318,6 +318,9 @@ def get_yolo_diff(
     valid_scores = combined_score[batch_idx][valid_mask]
     valid_confs = conf[batch_idx][valid_mask]
     valid_class_probs = class_probs[batch_idx][valid_mask]
+    valid_cls_idx = cls_idx[batch_idx][valid_mask]
+    valid_boxes = boxes[valid_mask]
+    valid_det_areas = det_area[valid_mask]
 
     # -----------------------------
     # 4. 选取得分最高的目标
@@ -325,6 +328,21 @@ def get_yolo_diff(
     best_idx = torch.argmax(valid_scores)
     best_conf = valid_confs[best_idx]
     best_class_prob = valid_class_probs[best_idx]
+    best_cls_idx = int(valid_cls_idx[best_idx].item())
+    best_bbox = valid_boxes[best_idx].detach().cpu().tolist()
+    best_area_ratio = valid_det_areas[best_idx] / mask_stats["mask_area"]
+
+    class_names = getattr(yolo_model, "names", None)
+    if isinstance(class_names, dict):
+        best_class_name = class_names.get(best_cls_idx, str(best_cls_idx))
+    elif isinstance(class_names, (list, tuple)) and 0 <= best_cls_idx < len(class_names):
+        best_class_name = class_names[best_cls_idx]
+    else:
+        best_class_name = str(best_cls_idx)
+
+    print("best_class:", best_class_name)
+    print("best_bbox:", best_bbox)
+    print("best_area_ratio:", best_area_ratio.item())
 
     # -----------------------------
     # 5. 构造损失（可反向传播）
