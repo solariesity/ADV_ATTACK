@@ -320,11 +320,13 @@ def get_input_optimizer(params, learning_rate, args):
     # this line to show that input is a parameter that requires a gradient
     # optimizer = optim.LBFGS([param.requires_grad_() for param in params], lr=learning_rate)
     # optimizer = optim.Adam([input_img.requires_grad_()])
-    if args["l1_norm"]:
-        optimizer = optim.Adam([param.requires_grad_() for param in params], lr=learning_rate, betas=(0.5, 0.9))
-    else:
-        # optimizer = optim.Adam([param.requires_grad_() for param in params], lr=learning_rate, betas=(0.5, 0.9))
+    optimizer_type = str(args.get("optimizer_type", "lbfgs")).lower()
+    if optimizer_type == "adam":
+        optimizer = optim.Adam([param.requires_grad_() for param in params], lr=learning_rate, betas=(0.9, 0.99))
+    elif optimizer_type == "lbfgs":
         optimizer = optim.LBFGS([param.requires_grad_() for param in params], lr=learning_rate)
+    else:
+        raise ValueError(f"Unsupported optimizer_type: {optimizer_type}")
     return optimizer
 
 
