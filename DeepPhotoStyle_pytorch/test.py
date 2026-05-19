@@ -118,10 +118,6 @@ if __name__ == "__main__":
     print("执行的命令是:", command)
 
     setup_seed(args["random_seed"])
-    if args["random_scene"]:
-        print("random_scene")
-    else:
-        print("fixed")
 
     style_image_name = args["style_image"]
     content_image_name = args["content_image"]
@@ -138,9 +134,6 @@ if __name__ == "__main__":
     scene_img_crop = process_scene_img("VW01.png")
     test_scene_img = process_scene_img("VW01.png")
 
-    # scene_img_crop = process_scene_img('000001.png')
-    # test_scene_img = process_scene_img('000001.png')
-
     print("Computing Laplacian matrix of content image")
     content_image_path = os.path.join(gen_content_path, content_image_name)
     L = utils.compute_lap(content_image_path)
@@ -156,10 +149,6 @@ if __name__ == "__main__":
     content_red_mask_tensor = torch.from_numpy(content_red_mask_np).unsqueeze(0).float().to(config.device0).requires_grad_(False)
     content_black_mask_tensor = torch.from_numpy(content_black_mask_np).unsqueeze(0).float().to(config.device0).requires_grad_(False)
     content_yellow_mask_tensor = torch.from_numpy(content_yellow_mask_np).unsqueeze(0).float().to(config.device0).requires_grad_(False)
-    # paint_mask_tensor = torch.from_numpy(paint_mask_np).unsqueeze(0).float().to(config.device0).requires_grad_(False)
-    # paint_mask_np_inf = np.arctanh((paint_mask_np - 0.5) * (2 - 1e-7))
-    # paint_mask_inf = torch.from_numpy(paint_mask_np_inf).unsqueeze(0).float().to(config.device0).requires_grad_(True)
-    # paint_mask_boarders = torch.tensor([0, car_mask_tensor.size()[2], 0, car_mask_tensor.size()[1]]).float().to(config.device0).requires_grad_(True)
 
     paint_mask_init = utils.get_mask_source(args["paint_mask"], car_mask_tensor.size(), paint_mask_np, args)
     paint_mask_tensor = utils.get_mask_target(args["paint_mask"], car_mask_tensor.size(), paint_mask_init)
@@ -172,8 +161,6 @@ if __name__ == "__main__":
     test_scene_img = utils.image_to_tensor(test_scene_img)[:3, :, :].unsqueeze(0).to(config.device0, torch.float)
 
     # Logger
-    # log_dir = os.path.join(os.path.abspath(os.getcwd()), 'logs', datetime.datetime.now().strftime('%b%d_%H-%M-%S_') + socket.gethostname())
-    # log_dir = os.path.join('/data/cheng443/depth_atk', 'logs', datetime.datetime.now().strftime('%b%d_%H-%M-%S_') + socket.gethostname() + '_CH')
     log_dir = os.path.join(utils.log_dir, "logs", datetime.datetime.now().strftime("%b%d_%H-%M-%S_") + args["log_postfix"])
     os.makedirs(log_dir)
     logger = SummaryWriter(log_dir)
@@ -218,23 +205,6 @@ if __name__ == "__main__":
     print(content_red_mask_np.size == 0)
     print(content_black_mask_np.size == 0)
     print(content_yellow_mask_np.size == 0)
-    # if np.all(content_white_mask_np == 0):
-    #     print("掩码全为0")
-    # else:
-    #     print("掩码不全为0")
-    # if np.all(content_red_mask_np == 0):
-    #     print("掩码全为0")
-    # else:
-    #     print("掩码不全为0")
-    # if np.all(content_black_mask_np == 0):
-    #     print("掩码全为0")
-    # else:
-    #     print("掩码不全为0")
-    # if np.all(content_yellow_mask_np == 0):
-    #     print("掩码全为0")
-    # else:
-    #     print("掩码不全为0")
-    # exit()
 
     output, yolo_model_2, yolo_result, adv_scene_ret = run_style_transfer(
         logger,

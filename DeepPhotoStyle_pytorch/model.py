@@ -394,6 +394,30 @@ def loss_fun3(x, mask):
     return torch.sum(x)
 
 
+def build_adv_car_image(input_img, car_img, paint_mask, content_mask_tensor, args):
+    if args["paint_mask"] == "-2":
+        input_img_resize = utils.texture_to_car_size(input_img, car_img.size())
+        return input_img_resize * paint_mask.unsqueeze(0) + car_img * (1 - paint_mask.unsqueeze(0))
+    return image_to_car(input_img, paint_mask, content_mask_tensor, car_img)
+
+
+def attach_adv_car_to_scene_for_training(scene_img, adv_car_image, car_img, car_mask, paint_mask, args, fixed_location):
+    if fixed_location:
+        adv_scene, car_scene, scene_obj_mask = attach_car_to_scene_fixed(scene_img, adv_car_image, car_img, car_mask, object_name=args["vehicle"])
+        scene_paint_mask = None
+    else:
+        adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_car_to_scene_Robustness_training(
+            scene_img,
+            adv_car_image,
+            car_img,
+            car_mask,
+            args["batch_size"],
+            paint_mask,
+            args["vehicle"],
+        )
+    return adv_scene, car_scene, scene_obj_mask, scene_paint_mask
+
+
 def get_adv_loss(
     input_img,
     car_img,
@@ -405,36 +429,20 @@ def get_adv_loss(
     args,
     fixed_location=False,
 ):
-    batch_size = args["batch_size"]
     fixed_location = args["fixed_location"]
     class_lambda = args["class_lambda"]
     use_official_yolo_tensor = bool(args.get("official_yolo_tensor", 0))
-    # compose adversarial image
-
-    if args["paint_mask"] == "-2":
-        input_img_resize = utils.texture_to_car_size(input_img, car_img.size())
-        adv_car_image = input_img_resize * paint_mask.unsqueeze(0) + car_img * (1 - paint_mask.unsqueeze(0))
-    if args["paint_mask"] != "-2":
-        adv_car_image = image_to_car(input_img, paint_mask, content_mask_tensor, car_img)
-        # torch.save(input_img, "./data/input_img.pt")
-        # torch.save(paint_mask, "./data/paint_mask.pt")
-        # torch.save(content_mask_tensor, "./data/content_mask_tensor.pt")
-        # torch.save(car_img, "./data/car_img.pt")
-
-    if fixed_location:
-        adv_scene, car_scene, scene_obj_mask = attach_car_to_scene_fixed(scene_img, adv_car_image, car_img, car_mask, object_name=args["vehicle"])
-        # torch.save(scene_img, "./data/scene_img.pt")
-        # torch.save(car_mask, "./data/car_mask.pt")
-        # torch.save(adv_scene, "./data/adv_scene_mask30.pt")
-        # sys.exit()
-
-        scene_mask = scene_obj_mask
-    else:
-        adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_car_to_scene_Robustness_training(scene_img, adv_car_image, car_img, car_mask, batch_size, paint_mask, args["vehicle"])
-        # adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_car_to_scene(scene_img, adv_car_image, car_img, car_mask, batch_size, paint_mask,args['vehicle'])
-        # adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_car_to_scene_validator(scene_img, adv_car_image, car_img, car_mask, batch_size, paint_mask,args['vehicle'])
-
-        scene_mask = scene_paint_mask if args["baseline"] == "baseline" else scene_obj_mask
+    adv_car_image = build_adv_car_image(input_img, car_img, paint_mask, content_mask_tensor, args)
+    adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_adv_car_to_scene_for_training(
+        scene_img,
+        adv_car_image,
+        car_img,
+        car_mask,
+        paint_mask,
+        args,
+        fixed_location=fixed_location,
+    )
+    scene_mask = scene_obj_mask if fixed_location else scene_paint_mask if args["baseline"] == "baseline" else scene_obj_mask
 
     if use_official_yolo_tensor:
         stride = get_model_stride(yolo_model)
@@ -626,6 +634,226 @@ def direction_update(
             paint_mask_init += direct
 
 
+def select_training_scene(train_loader, train_loader_iter, scene_img_fixed, batch_size, random_scene, step):
+    if random_scene:
+        try:
+            scene_img_batch, _ = next(train_loader_iter)
+            if scene_img_batch.size()[0] != batch_size:
+                raise StopIteration
+        except StopIteration:
+            train_loader_iter = iter(train_loader)
+            scene_img_batch, _ = next(train_loader_iter)
+        scene_img = scene_img_batch.to(config.device0)
+        return scene_img, scene_img_fixed, train_loader_iter
+
+    if step == 0:
+        try:
+            scene_img_batch, _ = next(train_loader_iter)
+            if scene_img_batch.size()[0] != batch_size:
+                raise StopIteration
+        except StopIteration:
+            train_loader_iter = iter(train_loader)
+            scene_img_batch, _ = next(train_loader_iter)
+        scene_img_fixed = scene_img_batch.to(config.device0)
+    return scene_img_fixed, scene_img_fixed, train_loader_iter
+
+
+def compute_perceptual_scores(model, style_losses, content_losses, tv_losses, input_img, style_weight, content_weight, tv_weight, skip_perceptual):
+    style_score = torch.zeros(1).float().to(config.device0)
+    content_score = torch.zeros(1).float().to(config.device0)
+    tv_score = torch.zeros(1).float().to(config.device0)
+
+    if not skip_perceptual:
+        model(input_img)
+        for sl in style_losses:
+            style_score += sl.loss
+
+        for cl in content_losses:
+            content_score += cl.loss
+
+        for tl in tv_losses:
+            tv_score += tl.loss
+
+    style_score *= style_weight
+    content_score *= content_weight
+    tv_score *= tv_weight
+    return style_score, content_score, tv_score
+
+
+def compute_adv_branch(
+    input_img,
+    car_img,
+    scene_img,
+    paint_mask,
+    car_mask,
+    yolo_model,
+    content_mask,
+    args,
+    Cam,
+    log_dir,
+    adv_weight,
+    midu_weight,
+):
+    adv_scene = None
+    adv_loss = torch.zeros(1).float().to(config.device0)
+    midu_loss = torch.zeros(1).float().to(config.device0)
+    train_mean_diff = torch.zeros(1).float().to(config.device0)
+
+    eot_samples = args.get("eot_samples", 3)
+    if eot_samples > 1:
+        print(f"Running EOT with {eot_samples} samples...")
+        total_adv_loss = torch.zeros(1).to(config.device0)
+        total_midu_loss = torch.zeros(1).to(config.device0)
+        total_train_mean_diff = torch.zeros(1).to(config.device0)
+        for _ in range(eot_samples):
+            transformed_scene_img = eot.apply_random_transforms(scene_img)
+            single_adv_loss, single_train_mean_diff, adv_scene = get_adv_loss(
+                input_img,
+                car_img,
+                transformed_scene_img,
+                paint_mask,
+                car_mask,
+                yolo_model,
+                content_mask,
+                args,
+            )
+            total_adv_loss += single_adv_loss.item()
+            total_train_mean_diff += single_train_mean_diff.item()
+            adv_scene_ = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(adv_scene[0].unsqueeze(0))
+            mask, pred = Cam(adv_scene_, 656, log_dir, save_img=args.get("save_gradcam", 0))
+            input_img.grad.zero_()
+
+            midu_loss_ = loss_midu.loss_midu_3(mask)
+            midu_loss_ *= midu_weight
+            total_midu_loss += midu_loss_
+            (single_adv_loss * adv_weight / eot_samples).backward(retain_graph=True)
+
+        adv_loss = total_adv_loss / eot_samples
+        midu_loss = total_midu_loss / eot_samples
+        train_mean_diff = total_train_mean_diff / eot_samples
+    else:
+        adv_loss, train_mean_diff, adv_scene = get_adv_loss(input_img, car_img, scene_img, paint_mask, car_mask, yolo_model, content_mask, args)
+
+    adv_loss *= adv_weight
+    return adv_loss, midu_loss, train_mean_diff, adv_scene
+
+
+def compute_color_losses(
+    input_img,
+    original_input_img,
+    color_scheme,
+    content_white_mask,
+    content_red_mask,
+    content_black_mask,
+    content_yellow_mask,
+    color_weight_14,
+    color_weight_2356,
+    original_weight,
+    color_power,
+):
+    color_loss_1 = color_loss_2 = color_loss_3 = color_loss_4 = color_loss_5 = color_loss_6 = torch.zeros(1).float().to(config.device0)
+
+    if color_scheme == 0:
+        color_loss_1 = color_loss.stain_color_loss(input_img, 0, content_red_mask, color_power=color_power)
+        color_loss_2 = color_loss.stain_color_loss(input_img, 1, content_white_mask, color_power=color_power)
+    elif color_scheme == 1:
+        color_loss_3 = color_loss.stain_color_loss(input_img, 2, content_yellow_mask, color_power=color_power)
+        color_loss_4 = color_loss.stain_color_loss(input_img, 3, content_black_mask, color_power=color_power)
+    elif color_scheme == 2:
+        color_loss_5 = color_loss.stain_color_loss(input_img, 0, content_red_mask, color_power=color_power)
+        color_loss_6 = color_loss.stain_color_loss(input_img, 2, content_yellow_mask, color_power=color_power)
+
+    color_loss_total = (
+        color_loss_1 * color_weight_14
+        + color_loss_4 * color_weight_14
+        + color_loss_2 * color_weight_2356
+        + color_loss_3 * color_weight_2356
+        + color_loss_5 * color_weight_2356
+        + color_loss_6 * color_weight_2356
+    )
+
+    original_loss = color_loss.original_color_loss(input_img, original_input_img)
+    original_loss *= original_weight
+    color_loss_terms = (color_loss_1, color_loss_2, color_loss_3, color_loss_4, color_loss_5, color_loss_6)
+    return color_loss_total, original_loss, color_loss_terms
+
+
+def determine_color_scheme(content_white_mask, content_red_mask, content_black_mask, content_yellow_mask):
+    color_scheme = 0
+    if (not torch.all(content_white_mask == 1)) and (not torch.all(content_red_mask == 1)):
+        color_scheme = 0
+    elif (not torch.all(content_black_mask == 1)) and (not torch.all(content_yellow_mask == 1)):
+        color_scheme = 1
+    elif (not torch.all(content_red_mask == 1)) and (not torch.all(content_yellow_mask == 1)):
+        color_scheme = 2
+    return color_scheme
+
+
+def log_training_visuals(
+    logger,
+    input_img,
+    car_img,
+    scene_img,
+    car_mask,
+    paint_mask,
+    content_mask,
+    yolo_model,
+    run_step,
+    num_steps,
+    args,
+):
+    logged_conf = None
+    adv_car_image = build_adv_car_image(input_img, car_img, paint_mask, content_mask, args)
+    adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_adv_car_to_scene_for_training(
+        scene_img,
+        adv_car_image,
+        car_img,
+        car_mask,
+        paint_mask,
+        args,
+        fixed_location=args["fixed_location"],
+    )
+
+    with torch.no_grad():
+        if bool(args.get("official_yolo_tensor", 0)):
+            stride = get_model_stride(yolo_model)
+            adv_scene_for_yolo, _ = preprocess_input_tensor_for_yolo(adv_scene, image_size=(640, 640), stride=stride)
+            adv_yolo = yolo_model(adv_scene_for_yolo)
+            output_img, plotted_detections, _ = plot_detections_official(
+                adv_yolo,
+                adv_scene,
+                image_size=(640, 640),
+                stride=stride,
+                conf_threshold=float(getattr(yolo_model, "conf", 0.1)),
+                iou_threshold=float(getattr(yolo_model, "iou", 0.45)),
+                class_names=getattr(yolo_model, "names", None),
+                agnostic=bool(getattr(yolo_model, "agnostic", False)),
+                max_det=int(getattr(yolo_model, "max_det", 300)),
+                return_detections=True,
+            )
+            if plotted_detections is not None and len(plotted_detections) > 0:
+                logged_conf = plotted_detections[:, 4].max().item()
+        else:
+            adv_yolo = yolo_model(adv_scene)
+            output_img, _, plotted_scores, _, _ = plot_detections(
+                adv_yolo,
+                adv_scene,
+                return_detections=True,
+            )
+            if plotted_scores is not None and len(plotted_scores) > 0:
+                logged_conf = plotted_scores.max().item()
+
+    output_img_np = np.array(output_img)
+    logger.add_image("Train/YOLO_Adv_scene", output_img_np, run_step, dataformats="HWC")
+
+    yolo_result = output_img if run_step > num_steps - 30 else None
+    adv_scene_result = adv_scene if run_step > num_steps - 30 else None
+
+    del adv_yolo, output_img, output_img_np
+    torch.cuda.empty_cache()
+    return logged_conf, yolo_result, adv_scene_result
+
+
 def run_style_transfer(
     logger: SummaryWriter,
     cnn,
@@ -665,12 +893,10 @@ def run_style_transfer(
     decay_steps = int(args["decay_steps"] * num_steps)
     decay_power = args["decay_power"]
     nps_weight = args["nps_weight"]
-    color_weight = args["color_weight"]
     color_weight_14 = args.get("color_weight_14", 0.1)
     color_weight_2356 = args.get("color_weight_2356", 1.0)
     original_weight = args["original_weight"]
     device_num = args["device"]
-    class_lambda = args["class_lambda"]
     midu_weight = args["midu_weight"]
     color_power = args.get("color_power", 1)
 
@@ -682,10 +908,10 @@ def run_style_transfer(
     scene_data_len = len(train_loader)
     train_loader_iter = iter(train_loader)
 
-    if args["random_scene"]:
-        print("Using random scene... Scene dataset size: ", scene_data_len)
-    else:
-        print("Scene dataset loaded (random_scene=False), size: ", scene_data_len)
+    # if args["random_scene"]:
+    #     print("Using random scene... Scene dataset size: ", scene_data_len)
+    # else:
+    #     print("Scene dataset loaded (random_scene=False), size: ", scene_data_len)
 
     paint_mask = utils.get_mask_target(args["paint_mask"], car_mask.size(), paint_mask_init)
     init_mask_ratio = get_mask_ratio(paint_mask, car_mask).item()
@@ -715,8 +941,7 @@ def run_style_transfer(
     )
 
     # get depth model
-    scene_size = (1024, 320)
-    # depth_model = import_depth_model(scene_size, model_type=args['depth_model']).to(config.device0).eval()
+    # depth_model = import_depth_model((1024, 320), model_type=args['depth_model']).to(config.device0).eval()
     # yolo_model = import_yolov5s_model_1(device_num, None, "yolov5s")
     yolo_model_2 = import_yolov5s_model_2(device_num, None, "yolov5s")
 
@@ -760,17 +985,10 @@ def run_style_transfer(
 
     mask_loss = torch.zeros(1)
 
-    scene_img_ = None
     scene_img_fixed = None
     Cam = CAM()
 
-    color_scheme = 0  # 0 for black-yellow, 1 for white-red, 2 for red-yellow
-    if (not torch.all(content_white_mask == 1)) and (not torch.all(content_red_mask == 1)):
-        color_scheme = 0
-    elif (not torch.all(content_black_mask == 1)) and (not torch.all(content_yellow_mask == 1)):
-        color_scheme = 1
-    elif (not torch.all(content_red_mask == 1)) and (not torch.all(content_yellow_mask == 1)):
-        color_scheme = 2
+    color_scheme = determine_color_scheme(content_white_mask, content_red_mask, content_black_mask, content_yellow_mask)
 
     while run[0] <= num_steps:
 
@@ -789,7 +1007,6 @@ def run_style_transfer(
             nonlocal paint_mask_init
             nonlocal mask_loss
             nonlocal run_mask_optimize
-            nonlocal scene_img_
             nonlocal scene_img_fixed
             nonlocal yolo_result
             nonlocal adv_scene_result
@@ -801,121 +1018,61 @@ def run_style_transfer(
             optimizer.zero_grad()
             mask_optimizer.zero_grad()
 
-            style_score = torch.zeros(1).float().to(config.device0)
-            content_score = torch.zeros(1).float().to(config.device0)
-            tv_score = torch.zeros(1).float().to(config.device0)
             rl_score = torch.zeros(1).float().to(config.device0)
             l1_loss = torch.zeros(1).float().to(config.device0)
-            adv_loss = torch.zeros(1).float().to(config.device0)
-            midu_loss = torch.zeros(1).float().to(config.device0)
-            single_adv_loss = torch.zeros(1).float().to(config.device0)
-            train_mean_diff = torch.zeros(1).float().to(config.device0)
+            style_score, content_score, tv_score = compute_perceptual_scores(
+                model,
+                style_losses,
+                content_losses,
+                tv_losses,
+                input_img,
+                style_weight,
+                content_weight,
+                tv_weight,
+                skip_perceptual=args["l1_norm"],
+            )
 
-            if not args["l1_norm"]:
-                model(input_img)
-                for sl in style_losses:
-                    style_score += sl.loss
+            scene_img, scene_img_fixed, train_loader_iter = select_training_scene(
+                train_loader,
+                train_loader_iter,
+                scene_img_fixed,
+                args["batch_size"],
+                args["random_scene"],
+                run[0],
+            )
 
-                for cl in content_losses:
-                    content_score += cl.loss
-
-                for tl in tv_losses:
-                    tv_score += tl.loss
-
-            style_score *= style_weight
-            content_score *= content_weight
-            tv_score *= tv_weight
-
-            if args["random_scene"]:
-                try:
-                    scene_img_, _ = next(train_loader_iter)
-                    if scene_img_.size()[0] != args["batch_size"]:
-                        raise StopIteration
-                except StopIteration:
-                    train_loader_iter = iter(train_loader)
-                    scene_img_, _ = next(train_loader_iter)
-                scene_img = scene_img_.to(config.device0)
-            else:
-                if run[0] == 0:
-                    try:
-                        scene_img_, _ = next(train_loader_iter)
-                        if scene_img_.size()[0] != args["batch_size"]:
-                            raise StopIteration
-                    except StopIteration:
-                        train_loader_iter = iter(train_loader)
-                        scene_img_, _ = next(train_loader_iter)
-                    scene_img_fixed = scene_img_.to(config.device0)
-                scene_img = scene_img_fixed
-
-            eot_samples = args.get("eot_samples", 3)  # 默认为1，即不使用EOT
-            adv_scene = None
-            if eot_samples > 1:
-                print(f"Running EOT with {eot_samples} samples...")
-                total_adv_loss = torch.zeros(1).to(config.device0)
-                total_midu_loss = torch.zeros(1).to(config.device0)
-                total_train_mean_diff = torch.zeros(1).to(config.device0)
-                # 三次eot
-                for _ in range(eot_samples):
-                    transformed_scene_img = eot.apply_random_transforms(scene_img)
-                    single_adv_loss, single_train_mean_diff, adv_scene = get_adv_loss(
-                        input_img,
-                        car_img,
-                        transformed_scene_img,
-                        paint_mask,
-                        car_mask,
-                        yolo_model_2,
-                        content_mask,
-                        args,
-                    )
-                    total_adv_loss += single_adv_loss.item()
-                    total_train_mean_diff += single_train_mean_diff.item()
-                    t_index = 656
-                    adv_scene_ = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(adv_scene[0].unsqueeze(0))
-                    mask, pred = Cam(adv_scene_, t_index, log_dir, save_img=args.get("save_gradcam", 0))
-                    input_img.grad.zero_()
-
-                    midu_loss_ = loss_midu.loss_midu_3(mask)
-                    midu_loss_ *= midu_weight
-                    total_midu_loss += midu_loss_
-                    (single_adv_loss * adv_weight / eot_samples).backward(retain_graph=True)
-                    # print("EOT backward grad:", input_img.grad is not None, 0.0 if input_img.grad is None else input_img.grad.norm().item())
-
-                adv_loss = total_adv_loss / eot_samples
-                midu_loss = total_midu_loss / eot_samples
-                train_mean_diff = total_train_mean_diff / eot_samples
-
-            else:
-                # 如果 eot_samples <= 1，则按原来的方式执行
-                adv_loss, train_mean_diff, adv_scene = get_adv_loss(input_img, car_img, scene_img, paint_mask, car_mask, yolo_model_2, content_mask, args)
-
-            adv_loss *= adv_weight
-            # print(input_img.shape)
+            adv_loss, midu_loss, train_mean_diff, adv_scene = compute_adv_branch(
+                input_img,
+                car_img,
+                scene_img,
+                paint_mask,
+                car_mask,
+                yolo_model_2,
+                content_mask,
+                args,
+                Cam,
+                log_dir,
+                adv_weight,
+                midu_weight,
+            )
 
             nps_loss_ = nps_loss.nps_loss(input_img)
             nps_loss_ *= nps_weight
 
-            color_loss_1 = color_loss_2 = color_loss_3 = color_loss_4 = color_loss_5 = color_loss_6 = torch.zeros(1).float().to(config.device0)
-
-            if color_scheme == 0:
-                color_loss_1 = color_loss.stain_color_loss(input_img, 0, content_red_mask, color_power=color_power)
-                color_loss_2 = color_loss.stain_color_loss(input_img, 1, content_white_mask, color_power=color_power)
-            elif color_scheme == 1:
-                color_loss_3 = color_loss.stain_color_loss(input_img, 2, content_yellow_mask, color_power=color_power)
-                color_loss_4 = color_loss.stain_color_loss(input_img, 3, content_black_mask, color_power=color_power)
-            elif color_scheme == 2:
-                color_loss_5 = color_loss.stain_color_loss(input_img, 0, content_red_mask, color_power=color_power)
-                color_loss_6 = color_loss.stain_color_loss(input_img, 2, content_yellow_mask, color_power=color_power)
-            color_loss_ = (
-                color_loss_1 * color_weight_14
-                + color_loss_4 * color_weight_14
-                + color_loss_2 * color_weight_2356
-                + color_loss_3 * color_weight_2356
-                + color_loss_5 * color_weight_2356
-                + color_loss_6 * color_weight_2356
+            color_loss_, original_loss_, color_loss_terms = compute_color_losses(
+                input_img,
+                original_input_img,
+                color_scheme,
+                content_white_mask,
+                content_red_mask,
+                content_black_mask,
+                content_yellow_mask,
+                color_weight_14,
+                color_weight_2356,
+                original_weight,
+                color_power,
             )
-
-            original_loss_ = color_loss.original_color_loss(input_img, original_input_img)
-            original_loss_ *= original_weight
+            color_loss_1, color_loss_2, color_loss_3, color_loss_4, color_loss_5, color_loss_6 = color_loss_terms
 
             # print("original_loss_:", original_loss_)
 
@@ -989,13 +1146,7 @@ def run_style_transfer(
                 logged_conf = max(0.0, min(1.0, logged_conf))
 
                 if run[0] % 100 == 0 or run[0] == 1 or run[0] == num_steps:
-                    texture_img = utils.texture_to_car_size(input_img.data.clone(), car_img.size())
-                    # add mask and evluate
-                    if args["paint_mask"] == "-2":
-                        saved_img = texture_img * paint_mask.unsqueeze(0) + car_img * (1 - paint_mask.unsqueeze(0))
-                    if args["paint_mask"] != "-2":
-                        saved_img = image_to_car(input_img, paint_mask, content_mask, car_img)
-
+                    saved_img = build_adv_car_image(input_img.data.clone(), car_img, paint_mask, content_mask, args)
                     saved_img.data.clamp_(0, 1)
 
                     if args["l1_norm"]:
@@ -1046,60 +1197,24 @@ def run_style_transfer(
                     #     run[0],
                     # )
 
-                    if args["paint_mask"] == "-2":
-                        input_img_resize = utils.texture_to_car_size(input_img, car_img.size())
-                        adv_car_image = input_img_resize * paint_mask.unsqueeze(0) + car_img * (1 - paint_mask.unsqueeze(0))
-                    if args["paint_mask"] != "-2":
-                        adv_car_image = image_to_car(input_img, paint_mask, content_mask, car_img)
-
-                    fixed_location = args["fixed_location"]
-                    if fixed_location:
-                        adv_scene, car_scene, scene_obj_mask = attach_car_to_scene_fixed(scene_img, adv_car_image, car_img, car_mask, object_name=args["vehicle"])
-
-                    else:
-                        adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_car_to_scene_Robustness_training(
-                            scene_img, adv_car_image, car_img, car_mask, args["batch_size"], paint_mask, args["vehicle"]
-                        )
-
-                    with torch.no_grad():  # ← 添加无梯度上下文
-                        if bool(args.get("official_yolo_tensor", 0)):
-                            stride = get_model_stride(yolo_model_2)
-                            adv_scene_for_yolo, _ = preprocess_input_tensor_for_yolo(adv_scene, image_size=(640, 640), stride=stride)
-                            adv_yolo = yolo_model_2(adv_scene_for_yolo)
-                            output_img, plotted_detections, _ = plot_detections_official(
-                                adv_yolo,
-                                adv_scene,
-                                image_size=(640, 640),
-                                stride=stride,
-                                conf_threshold=float(getattr(yolo_model_2, "conf", 0.1)),
-                                iou_threshold=float(getattr(yolo_model_2, "iou", 0.45)),
-                                class_names=getattr(yolo_model_2, "names", None),
-                                agnostic=bool(getattr(yolo_model_2, "agnostic", False)),
-                                max_det=int(getattr(yolo_model_2, "max_det", 300)),
-                                return_detections=True,
-                            )
-                            if plotted_detections is not None and len(plotted_detections) > 0:
-                                logged_conf = plotted_detections[:, 4].max().item()
-                        else:
-                            adv_yolo = yolo_model_2(adv_scene)
-                            # adv_yolo = convert_xywh_to_original(adv_yolo)
-                            output_img, _, plotted_scores, _, _ = plot_detections(
-                                adv_yolo,
-                                adv_scene,
-                                return_detections=True,
-                            )
-                            if plotted_scores is not None and len(plotted_scores) > 0:
-                                logged_conf = plotted_scores.max().item()
-
-                    output_img_np = np.array(output_img)
-                    logger.add_image("Train/YOLO_Adv_scene", output_img_np, run[0], dataformats="HWC")
-
-                    if run[0] > num_steps - 30:
-                        yolo_result = output_img
-                        adv_scene_result = adv_scene
-
-                    del adv_yolo, output_img, output_img_np  # 显式释放
-                    torch.cuda.empty_cache()  # 清理缓存
+                    log_conf_override, yolo_result_candidate, adv_scene_result_candidate = log_training_visuals(
+                        logger,
+                        input_img,
+                        car_img,
+                        scene_img,
+                        car_mask,
+                        paint_mask,
+                        content_mask,
+                        yolo_model_2,
+                        run[0],
+                        num_steps,
+                        args,
+                    )
+                    if log_conf_override is not None:
+                        logged_conf = log_conf_override
+                    if yolo_result_candidate is not None:
+                        yolo_result = yolo_result_candidate
+                        adv_scene_result = adv_scene_result_candidate
 
                 print("run {}/{}:".format(run, num_steps))
                 print(
