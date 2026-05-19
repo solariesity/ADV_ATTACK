@@ -16,8 +16,7 @@ LOG_DIR="$PROJECT_DIR/log/1"
 LOG_FILE="$LOG_DIR/$(basename "${SCRIPT_PATH%.sh}").txt"
 
 mkdir -p "$LOG_DIR"
-chmod +x "$SCRIPT_PATH"
-nohup "$SCRIPT_PATH" > "$LOG_FILE" 2>&1 &
+nohup bash "$SCRIPT_PATH" > "$LOG_FILE" 2>&1 &
 
 echo "Started: $SCRIPT_PATH"
 echo "PID: $!"
