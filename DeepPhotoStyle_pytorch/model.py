@@ -802,7 +802,6 @@ def log_training_visuals(
     num_steps,
     args,
 ):
-    logged_conf = None
     adv_car_image = build_adv_car_image(input_img, car_img, paint_mask, content_mask, args)
     adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_adv_car_to_scene_for_training(
         scene_img,
@@ -831,8 +830,6 @@ def log_training_visuals(
                 max_det=int(getattr(yolo_model, "max_det", 300)),
                 return_detections=True,
             )
-            if plotted_detections is not None and len(plotted_detections) > 0:
-                logged_conf = plotted_detections[:, 4].max().item()
         else:
             adv_yolo = yolo_model(adv_scene)
             output_img, _, plotted_scores, _, _ = plot_detections(
@@ -840,8 +837,6 @@ def log_training_visuals(
                 adv_scene,
                 return_detections=True,
             )
-            if plotted_scores is not None and len(plotted_scores) > 0:
-                logged_conf = plotted_scores.max().item()
 
     output_img_np = np.array(output_img)
     logger.add_image("Train/YOLO_Adv_scene", output_img_np, run_step, dataformats="HWC")
@@ -851,7 +846,208 @@ def log_training_visuals(
 
     del adv_yolo, output_img, output_img_np
     torch.cuda.empty_cache()
-    return logged_conf, yolo_result, adv_scene_result
+    return yolo_result, adv_scene_result
+
+
+def compute_mask_metrics(paint_mask, car_mask, paint_mask_init, run_mask_optimize, mask_loss_thresh, mwUpdater, args):
+    if run_mask_optimize and (args["paint_mask"] == "-2" or args["paint_mask"] == "-3"):
+        mask_ratio = get_mask_ratio(paint_mask, car_mask)
+        mask_weight = mwUpdater.step(mask_ratio.item())
+        mask_loss = mask_loss_fucntion2(paint_mask_init, car_mask, mask_weight)
+    else:
+        mask_ratio = get_mask_ratio(paint_mask, car_mask)
+        mask_weight = 0
+        mask_loss = mask_loss_fucntion(mask_ratio, mask_loss_thresh, 0)
+    return mask_ratio, mask_weight, mask_loss
+
+
+def compute_and_backward_loss(
+    input_img,
+    car_img,
+    paint_mask,
+    laplacian_m,
+    args,
+    run_step,
+    num_steps,
+    style_score,
+    content_score,
+    tv_score,
+    adv_loss,
+    mask_loss,
+    midu_loss,
+    nps_loss_,
+    color_loss_,
+    original_loss_,
+    rl_weight,
+    l1_weight,
+    style_lambda,
+    adv_weight,
+):
+    rl_score = torch.zeros(1).float().to(config.device0)
+    l1_loss = torch.zeros(1).float().to(config.device0)
+
+    if args["l1_norm"]:
+        l1_loss = get_lp_norm_loss(input_img, car_img, paint_mask)
+        l1_loss *= l1_weight
+        loss = l1_loss + adv_loss + mask_loss
+        loss.backward()
+        return loss, rl_score, l1_loss
+
+    manual_grad = False
+    if run_step > num_steps // 2:
+        rl_score, part_grid = realistic_loss_grad(input_img, laplacian_m)
+        rl_score *= rl_weight
+        part_grid *= rl_weight
+        if manual_grad:
+            loss = style_lambda * (style_score + content_score + tv_score + nps_loss_ + color_loss_ + original_loss_) + adv_loss + mask_loss + midu_loss
+            loss.backward()
+            input_img.grad += part_grid
+            loss = loss + rl_score
+        else:
+            loss = style_lambda * (style_score + content_score + tv_score + rl_score + nps_loss_ + color_loss_ + original_loss_) + adv_loss + mask_loss + midu_loss
+            loss.backward()
+    else:
+        loss = style_lambda * (style_score + content_score + tv_score + nps_loss_ + color_loss_ + original_loss_) + adv_loss + mask_loss + midu_loss
+        loss.backward()
+
+    torch.nn.utils.clip_grad_value_([input_img], clip_value=0.5 * adv_weight / 1000000)
+    return loss, rl_score, l1_loss
+
+
+def log_training_metrics(
+    logger,
+    run_step,
+    num_steps,
+    run_ref,
+    style_score,
+    content_score,
+    tv_score,
+    rl_score,
+    adv_loss,
+    l1_loss,
+    mask_loss,
+    nps_loss_,
+    color_loss_,
+    original_loss_,
+    midu_loss,
+    mask_ratio,
+    mask_weight,
+    train_mean_diff,
+    loss,
+):
+    print("run {}/{}:".format(run_ref, num_steps))
+    print(
+        "Style Loss: {:4f} Content Loss: {:4f} TV Loss: {:4f} real loss: {:4f} adv_loss: {:4f} l1_norm_loss: {:4f} mask_loss: {:4f} nps_loss: {:4f} color_loss: {:4f} original_loss: {:4f} midu_loss: {:4f}".format(
+            style_score.item(),
+            content_score.item(),
+            tv_score.item(),
+            rl_score.item(),
+            adv_loss.item(),
+            l1_loss.item(),
+            mask_loss.item(),
+            nps_loss_.item(),
+            color_loss_.item(),
+            original_loss_.item(),
+            midu_loss.item(),
+        )
+    )
+    print("Box Area Percentage: {} %".format(mask_ratio.item() * 100))
+    print("Total Loss: ", loss.item())
+
+    logger.add_scalar("Train/Style_loss", style_score.item(), run_step)
+    logger.add_scalar("Train/Content_loss", content_score.item(), run_step)
+    logger.add_scalar("Train/TV_loss", tv_score.item(), run_step)
+    logger.add_scalar("Train/Real_loss", rl_score.item(), run_step)
+    logger.add_scalar("Train/Adv_loss", adv_loss.item(), run_step)
+    logger.add_scalar("Train/midu_loss", midu_loss.item(), run_step)
+    logger.add_scalar("Train/Total_loss", loss.item(), run_step)
+    logger.add_scalar("Train/L1_norm_loss", l1_loss.item(), run_step)
+    logger.add_scalar("Train/Mask_loss", mask_loss.item(), run_step)
+    logger.add_scalar("Train/Mask_weight", mask_weight, run_step)
+    logger.add_scalar("Train/Mask_obj_ratio", mask_ratio.item(), run_step)
+    logger.add_scalar("Train/Mean_depth_diff_training", train_mean_diff.item(), run_step)
+
+
+def should_log_step(run_step, num_steps):
+    return run_step % 100 == 0 or run_step == 1 or run_step == num_steps
+
+
+def handle_periodic_step_logging(
+    logger,
+    run_step,
+    num_steps,
+    run_ref,
+    input_img,
+    car_img,
+    scene_img,
+    car_mask,
+    paint_mask,
+    content_mask,
+    yolo_model,
+    style_score,
+    content_score,
+    tv_score,
+    rl_score,
+    adv_loss,
+    l1_loss,
+    mask_loss,
+    nps_loss_,
+    color_loss_,
+    original_loss_,
+    midu_loss,
+    mask_ratio,
+    mask_weight,
+    train_mean_diff,
+    loss,
+    args,
+    yolo_result,
+    adv_scene_result,
+):
+    if not should_log_step(run_step, num_steps):
+        return yolo_result, adv_scene_result
+
+    if args["l1_norm"]:
+        log_perterbation(logger, input_img, car_img, paint_mask, run_step)
+
+    yolo_result_candidate, adv_scene_result_candidate = log_training_visuals(
+        logger,
+        input_img,
+        car_img,
+        scene_img,
+        car_mask,
+        paint_mask,
+        content_mask,
+        yolo_model,
+        run_step,
+        num_steps,
+        args,
+    )
+    if yolo_result_candidate is not None:
+        yolo_result = yolo_result_candidate
+        adv_scene_result = adv_scene_result_candidate
+
+    log_training_metrics(
+        logger,
+        run_step,
+        num_steps,
+        run_ref,
+        style_score,
+        content_score,
+        tv_score,
+        rl_score,
+        adv_loss,
+        l1_loss,
+        mask_loss,
+        nps_loss_,
+        color_loss_,
+        original_loss_,
+        midu_loss,
+        mask_ratio,
+        mask_weight,
+        train_mean_diff,
+        loss,
+    )
+    return yolo_result, adv_scene_result
 
 
 def run_style_transfer(
@@ -1020,6 +1216,7 @@ def run_style_transfer(
 
             rl_score = torch.zeros(1).float().to(config.device0)
             l1_loss = torch.zeros(1).float().to(config.device0)
+            # 计算当前纹理的风格损失、内容损失和 TV 损失。
             style_score, content_score, tv_score = compute_perceptual_scores(
                 model,
                 style_losses,
@@ -1032,6 +1229,7 @@ def run_style_transfer(
                 skip_perceptual=args["l1_norm"],
             )
 
+            # 为当前优化步选择训练场景 batch。
             scene_img, scene_img_fixed, train_loader_iter = select_training_scene(
                 train_loader,
                 train_loader_iter,
@@ -1041,6 +1239,7 @@ def run_style_transfer(
                 run[0],
             )
 
+            # 计算对抗目标；如果开启 EOT，则在这里走 EOT 分支。
             adv_loss, midu_loss, train_mean_diff, adv_scene = compute_adv_branch(
                 input_img,
                 car_img,
@@ -1059,6 +1258,7 @@ def run_style_transfer(
             nps_loss_ = nps_loss.nps_loss(input_img)
             nps_loss_ *= nps_weight
 
+            # 计算颜色一致性损失，以及与原始输入相关的约束项。
             color_loss_, original_loss_, color_loss_terms = compute_color_losses(
                 input_img,
                 original_input_img,
@@ -1076,50 +1276,42 @@ def run_style_transfer(
 
             # print("original_loss_:", original_loss_)
 
-            if run_mask_optimize and (args["paint_mask"] == "-2" or args["paint_mask"] == "-3"):
-                # mask_ratio = get_mask_ratio(paint_mask,car_mask, paint_mask_init)
-                mask_ratio = get_mask_ratio(paint_mask, car_mask)
-                mask_weight = mwUpdater.step(mask_ratio.item())
-                # mask_loss= mask_loss_fucntion(mask_loss,mask_loss_thresh,adv_loss)
-                # mask_loss= mask_loss_fucntion(mask_ratio,mask_loss_thresh,mask_weight) # use this in all edges optimization
-                mask_loss = mask_loss_fucntion2(paint_mask_init, car_mask, mask_weight)  # use this in per edge optimization
-            else:
-                mask_ratio = get_mask_ratio(paint_mask, car_mask)
-                mask_loss = mask_loss_fucntion(mask_ratio, mask_loss_thresh, 0)  # always output 0
+            # 更新与 mask 相关的指标，并计算当前的 mask 惩罚项。
+            mask_ratio, mask_weight, mask_loss = compute_mask_metrics(
+                paint_mask,
+                car_mask,
+                paint_mask_init,
+                run_mask_optimize,
+                mask_loss_thresh,
+                mwUpdater,
+                args,
+            )
 
-            if args["l1_norm"]:
-                l1_loss = get_lp_norm_loss(input_img, car_img, paint_mask)
-                l1_loss *= l1_weight
-                loss = l1_loss + adv_loss + mask_loss
-                loss.backward()
-            else:
-                manual_grad = False
-                # Two stage optimaztion pipline
-                if run[0] > num_steps // 2:
-                    rl_score, part_grid = realistic_loss_grad(input_img, laplacian_m)
-                    rl_score *= rl_weight
-                    part_grid *= rl_weight
-                    if manual_grad:
-                        # Realistic loss relate sparse matrix computing,
-                        # which do not support autogard in pytorch, so we compute it separately.
-                        loss = style_lambda * (style_score + content_score + tv_score + nps_loss_ + color_loss_ + original_loss_) + adv_loss + mask_loss + midu_loss  # + rl_score
-                        loss.backward()
-                        input_img.grad += part_grid
-                        loss = loss + rl_score
-                    else:
-                        loss = style_lambda * (style_score + content_score + tv_score + rl_score + nps_loss_ + color_loss_ + original_loss_) + adv_loss + mask_loss + midu_loss
-                        # print("----------------------------------rl_score:", rl_score)
+            # 组装总损失，执行反向传播，并在需要时做梯度裁剪。
+            loss, rl_score, l1_loss = compute_and_backward_loss(
+                input_img,
+                car_img,
+                paint_mask,
+                laplacian_m,
+                args,
+                run[0],
+                num_steps,
+                style_score,
+                content_score,
+                tv_score,
+                adv_loss,
+                mask_loss,
+                midu_loss,
+                nps_loss_,
+                color_loss_,
+                original_loss_,
+                rl_weight,
+                l1_weight,
+                style_lambda,
+                adv_weight,
+            )
 
-                        loss.backward()
-                else:
-                    loss = style_lambda * (style_score + content_score + tv_score + nps_loss_ + color_loss_ + original_loss_) + adv_loss + mask_loss + midu_loss
-                    # loss = color_loss_
-                    loss.backward()
-                    # print("color_loss_:", color_loss_)
-                    # print("Gradient:", input_img.grad.norm())
-
-                # --- 梯度裁剪---
-                torch.nn.utils.clip_grad_value_([input_img], clip_value=0.5 * adv_weight / 1000000)  # 限制梯度绝对值不超过0.5
+            if not args["l1_norm"]:
 
                 if loss < best_loss and run[0] > 200:
                     # print(best_loss)
@@ -1141,116 +1333,38 @@ def run_style_transfer(
                     direction_update(paint_mask_init, adv_loss, input_img, car_img, scene_img, car_mask, depth_model, adv_weight, args)
 
             run[0] += 1
-            if run[0] % 100 == 0 or run[0] == 1:
-                logged_conf = 1.0 + 1e-6 - (10 ** ((-adv_loss / adv_weight).item()))
-                logged_conf = max(0.0, min(1.0, logged_conf))
-
-                if run[0] % 100 == 0 or run[0] == 1 or run[0] == num_steps:
-                    saved_img = build_adv_car_image(input_img.data.clone(), car_img, paint_mask, content_mask, args)
-                    saved_img.data.clamp_(0, 1)
-
-                    if args["l1_norm"]:
-                        log_perterbation(logger, input_img, car_img, paint_mask, run[0])
-
-                    # generated_root_path = utils.project_root + "pseudo_lidar/figures/GeneratedAtks/"
-                    # scene_name_set = ["000001", "000004", "000009", "000027", "000033", "000034", "000038", "000042", "000051", "000059", "000097", "000127", "0000000090", "000005"]
-                    # mean_depth_diff = 0
-                    # for validator_scene_name in scene_name_set:
-                    #     test_scene_img_path = os.path.join(generated_root_path, "Scene", f"{validator_scene_name}.png")
-                    #     test_scene_img = pil.open(test_scene_img_path)
-                    #     original_w, original_h = test_scene_img.size
-                    #     scene_size = (1024, 320)
-                    #     new_w, new_h = scene_size
-                    #     left = (original_w - new_w) // 2
-                    #     right = left + new_w
-                    #     top = original_h - new_h
-                    #     bottom = original_h
-                    #     test_scene_img = test_scene_img.crop((left, top, right, bottom))
-                    #     test_scene_img = transforms.ToTensor()(test_scene_img)[:3, :, :].unsqueeze(0).to(config.device0)
-                    #
-                    #     (
-                    #         adv_scene_out,
-                    #         car_scene_out,
-                    #         scene_car_mask,
-                    #         scene_paint_mask,
-                    #     ) = attach_car_to_scene_validator(
-                    #         test_scene_img,
-                    #         # scene_img,
-                    #         saved_img,
-                    #         car_img,
-                    #         car_mask,
-                    #         args["batch_size"],
-                    #         paint_mask,
-                    #         args["vehicle"],
-                    #     )
-                    # logger.add_image("Train/Car_scene", car_scene_out[0], run[0])
-                    # logger.add_image("Train/Adv_scene", adv_scene_out[0], run[0])
-                    # logger.add_image("Train/Adv_car", saved_img[0], run[0])
-                    # logger.add_image(
-                    #     "Train/Adv_patch",
-                    #     utils.extract_patch(saved_img, paint_mask)[0],
-                    #     run[0],
-                    # )
-                    # logger.add_image(
-                    #     "Train/Paint_mask",
-                    #     np.moveaxis(color_mapping(paint_mask, vmax=1, vmin=0), -1, 0),
-                    #     run[0],
-                    # )
-
-                    log_conf_override, yolo_result_candidate, adv_scene_result_candidate = log_training_visuals(
-                        logger,
-                        input_img,
-                        car_img,
-                        scene_img,
-                        car_mask,
-                        paint_mask,
-                        content_mask,
-                        yolo_model_2,
-                        run[0],
-                        num_steps,
-                        args,
-                    )
-                    if log_conf_override is not None:
-                        logged_conf = log_conf_override
-                    if yolo_result_candidate is not None:
-                        yolo_result = yolo_result_candidate
-                        adv_scene_result = adv_scene_result_candidate
-
-                print("run {}/{}:".format(run, num_steps))
-                print(
-                    "Style Loss: {:4f} Content Loss: {:4f} TV Loss: {:4f} real loss: {:4f} adv_loss: {:4f} l1_norm_loss: {:4f} mask_loss: {:4f} nps_loss: {:4f} color_loss: {:4f} original_loss: {:4f} midu_loss: {:4f}".format(
-                        style_score.item(),
-                        content_score.item(),
-                        tv_score.item(),
-                        rl_score.item(),
-                        adv_loss.item(),
-                        l1_loss.item(),
-                        mask_loss.item(),
-                        nps_loss_.item(),
-                        color_loss_.item(),
-                        original_loss_.item(),
-                        midu_loss.item(),
-                    )
-                )
-
-                print("Box Area Percentage: {} %".format(mask_ratio.item() * 100))
-
-                print("Total Loss: ", loss.item())
-
-                # logger.add_scalar("Train/loss", loss.item(), run[0])
-                logger.add_scalar("Train/Style_loss", style_score.item(), run[0])
-                logger.add_scalar("Train/Content_loss", content_score.item(), run[0])
-                logger.add_scalar("Train/TV_loss", tv_score.item(), run[0])
-                logger.add_scalar("Train/Real_loss", rl_score.item(), run[0])
-                logger.add_scalar("Train/Adv_loss", adv_loss.item(), run[0])
-                logger.add_scalar("Train/midu_loss", midu_loss.item(), run[0])
-                logger.add_scalar("Train/Total_loss", loss.item(), run[0])
-                logger.add_scalar("Train/L1_norm_loss", l1_loss.item(), run[0])
-                logger.add_scalar("Train/Mask_loss", mask_loss.item(), run[0])
-                logger.add_scalar("Train/Mask_weight", mwUpdater.get_mask_weight(), run[0])
-                logger.add_scalar("Train/Mask_obj_ratio", mask_ratio.item(), run[0])
-                logger.add_scalar("Train/Mean_depth_diff_training", train_mean_diff.item(), run[0])
-                # logger.add_image('Train/Paint_mask', np.moveaxis(color_mapping(paint_mask, vmax=1, vmin=0), -1, 0), run[0])
+            # 在固定间隔、第一步和最后一步统一处理可视化与日志记录。
+            yolo_result, adv_scene_result = handle_periodic_step_logging(
+                logger,
+                run[0],
+                num_steps,
+                run,
+                input_img,
+                car_img,
+                scene_img,
+                car_mask,
+                paint_mask,
+                content_mask,
+                yolo_model_2,
+                style_score,
+                content_score,
+                tv_score,
+                rl_score,
+                adv_loss,
+                l1_loss,
+                mask_loss,
+                nps_loss_,
+                color_loss_,
+                original_loss_,
+                midu_loss,
+                mask_ratio,
+                mask_weight,
+                train_mean_diff,
+                loss,
+                args,
+                yolo_result,
+                adv_scene_result,
+            )
             print("Gradient:", input_img.grad.norm())
             print("adv loss:", adv_loss / adv_weight)
             # print("color_loss_:", color_loss_)
