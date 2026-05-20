@@ -1312,7 +1312,6 @@ def run_style_transfer(
             )
 
             if not args["l1_norm"]:
-
                 if loss < best_loss and run[0] > 200:
                     # print(best_loss)
                     best_loss = loss
@@ -1368,8 +1367,8 @@ def run_style_transfer(
             print("Gradient:", input_img.grad.norm())
             print("adv loss:", adv_loss / adv_weight)
             # print("color_loss_:", color_loss_)
-            print("color_loss3:", color_loss_3)
-            print("color_loss4:", color_loss_4)
+            # print("color_loss3:", color_loss_3)
+            # print("color_loss4:", color_loss_4)
             print("total loss:", loss.item())
 
             if run[0] > (1 - args["decay_steps"]) * num_steps:
