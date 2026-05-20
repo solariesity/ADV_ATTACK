@@ -652,7 +652,28 @@ def direction_update(
             paint_mask_init += direct
 
 
-def select_training_scene(train_loader, train_loader_iter, fixed_scene_batch, batch_size, random_scene):
+def load_fixed_vehicle_scene_batch(batch_size):
+    scene_path = os.path.join(utils.vehicle_scene_path, "light_close_to_far_frame_000272.png")
+    scene_img = pil.open(scene_path).convert("RGB")
+    original_w, original_h = scene_img.size
+    new_w, new_h = scene_size
+    scale = min(new_w / original_w, new_h / original_h)
+    resized_w = max(1, int(round(original_w * scale)))
+    resized_h = max(1, int(round(original_h * scale)))
+    resized_scene = scene_img.resize((resized_w, resized_h), pil.BICUBIC)
+
+    letterboxed_scene = pil.new("RGB", scene_size, (0, 0, 0))
+    paste_left = (new_w - resized_w) // 2
+    paste_top = (new_h - resized_h) // 2
+    letterboxed_scene.paste(resized_scene, (paste_left, paste_top))
+
+    scene_img_tensor = utils.image_to_tensor(letterboxed_scene)[:3, :, :].unsqueeze(0).to(config.device0, torch.float)
+    return scene_img_tensor.repeat(batch_size, 1, 1, 1)
+
+
+def select_training_scene(train_loader, train_loader_iter, fixed_scene_batch, batch_size, random_scene, args):
+    if int(args.get("scene_car_mode", 0)) == 1:
+        return load_fixed_vehicle_scene_batch(batch_size), train_loader_iter
     if random_scene:
         try:
             scene_img_batch, _ = next(train_loader_iter)
@@ -661,7 +682,7 @@ def select_training_scene(train_loader, train_loader_iter, fixed_scene_batch, ba
         except StopIteration:
             train_loader_iter = iter(train_loader)
             scene_img_batch, _ = next(train_loader_iter)
-        scene_img = scene_img_batch.to(config.device0)
+            scene_img = scene_img_batch.to(config.device0)
         return scene_img, train_loader_iter
     return fixed_scene_batch, train_loader_iter
 
@@ -1247,6 +1268,7 @@ def run_style_transfer(
                 fixed_scene_batch,
                 args["batch_size"],
                 args["random_scene"],
+                args,
             )
 
             # 计算对抗目标；如果开启 EOT，则在这里走 EOT 分支。
