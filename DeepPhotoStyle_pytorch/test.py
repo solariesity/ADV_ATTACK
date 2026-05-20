@@ -86,6 +86,14 @@ if __name__ == "__main__":
     ap.add_argument("--save-gradcam", "-sgc", default=0, type=int, choices=[0, 1], help="Save Grad-CAM images: 1=save, 0=do not save")
     ap.add_argument("--official-yolo-tensor", "-oyt", default=0, type=int, choices=[0, 1], help="Use official-style tensor preprocess/NMS for YOLO tensor path: 1=enable, 0=disable")
     ap.add_argument(
+        "--scene-car-mode",
+        "-scm",
+        default=0,
+        type=int,
+        choices=[0, 1],
+        help="Enable scene-car mode: 1=detect vehicle in scene and paste patch directly on it, 0=use the original car-to-scene pipeline",
+    )
+    ap.add_argument(
         "--optimizer-type",
         "-ot",
         default="lbfgs",

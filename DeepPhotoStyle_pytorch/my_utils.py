@@ -14,10 +14,14 @@ if role == "60203":
     kitti_object_path = "/home/hyj/data/KITTI/object/"
     project_root = "/home/hyj/code/ADV_ATTACK/"
     log_dir = "/home/hyj/data/log2026/05"
+    vehicle_scene_path = "/data/hyj/advpatch/data/vehicle_scenes"
 elif role == "60204":
     kitti_object_path = "/data/hyj/advpatch/dataset/KITTI/object/"
     project_root = "/home/hyj/code/ADV_ATTACK/"
     log_dir = "/data/hyj/advpatch/MDE_Attack/log2026/05"
+    vehicle_scene_path = "/data/hyj/advpatch/data/vehicle_scenes"
+else:
+    vehicle_scene_path = "/data/hyj/advpatch/data/vehicle_scenes"
 
 
 def load_image(path, size):

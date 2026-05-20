@@ -418,32 +418,22 @@ def attach_adv_car_to_scene_for_training(scene_img, adv_car_image, car_img, car_
     return adv_scene, car_scene, scene_obj_mask, scene_paint_mask
 
 
-def get_adv_loss(
-    input_img,
-    car_img,
-    scene_img,
-    paint_mask,
-    car_mask,
-    yolo_model,
-    content_mask_tensor,
-    args,
-    fixed_location=False,
-):
-    fixed_location = args["fixed_location"]
-    class_lambda = args["class_lambda"]
-    use_official_yolo_tensor = bool(args.get("official_yolo_tensor", 0))
+def build_attack_scene(input_img, car_img, scene_img, paint_mask, car_mask, content_mask_tensor, args):
     adv_car_image = build_adv_car_image(input_img, car_img, paint_mask, content_mask_tensor, args)
-    adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_adv_car_to_scene_for_training(
+    return attach_adv_car_to_scene_for_training(
         scene_img,
         adv_car_image,
         car_img,
         car_mask,
         paint_mask,
         args,
-        fixed_location=fixed_location,
+        fixed_location=args["fixed_location"],
     )
-    scene_mask = scene_obj_mask if fixed_location else scene_paint_mask if args["baseline"] == "baseline" else scene_obj_mask
 
+
+def compute_detector_adv_loss(adv_scene, scene_obj_mask, scene_paint_mask, yolo_model, args):
+    class_lambda = args["class_lambda"]
+    use_official_yolo_tensor = bool(args.get("official_yolo_tensor", 0))
     if use_official_yolo_tensor:
         stride = get_model_stride(yolo_model)
         adv_scene_for_yolo, _ = preprocess_input_tensor_for_yolo(adv_scene, image_size=(640, 640), stride=stride)
@@ -459,21 +449,49 @@ def get_adv_loss(
     else:
         adv_yolo = yolo_model(adv_scene)
         mean_depth_diff = get_yolo_diff(adv_yolo, None, scene_obj_mask, yolo_model, class_lambda)
+    return mean_depth_diff
 
+
+def compute_scene_adv_loss(adv_scene, scene_obj_mask, scene_paint_mask, args, mean_depth_diff):
     loss_fun = torch.nn.MSELoss()
+    scene_mask = scene_obj_mask if args["fixed_location"] else scene_paint_mask if args["baseline"] == "baseline" else scene_obj_mask
 
     if args["adv_type"] == "depth":
-        adv_loss = -1 * get_mean_depth_diff(adv_depth, car_depth, scene_mask)
-    elif args["adv_type"] == "disp":
-        adv_loss = loss_fun2(adv_depth, scene_mask)
-    elif args["adv_type"] == "max_disp":
-        adv_loss = loss_fun(torch.max(adv_depth * scene_mask, dim=3)[0], torch.zeros(1).float().to(config.device0))
-    elif args["adv_type"] == "ratio_depth":
-        adv_loss = -1 * get_affected_ratio(adv_depth, car_depth, scene_mask)
+        return -1 * get_mean_depth_diff(adv_depth, car_depth, scene_mask)
+    if args["adv_type"] == "disp":
+        return loss_fun2(adv_depth, scene_mask)
+    if args["adv_type"] == "max_disp":
+        return loss_fun(torch.max(adv_depth * scene_mask, dim=3)[0], torch.zeros(1).float().to(config.device0))
+    if args["adv_type"] == "ratio_depth":
+        return -1 * get_affected_ratio(adv_depth, car_depth, scene_mask)
+    if args["adv_type"] == "yolo":
+        return -mean_depth_diff
+    raise ValueError(f"Unsupported adv_type: {args['adv_type']}")
 
-    elif args["adv_type"] == "yolo":
-        adv_loss = -mean_depth_diff
 
+def get_adv_loss(
+    input_img,
+    car_img,
+    scene_img,
+    paint_mask,
+    car_mask,
+    yolo_model,
+    content_mask_tensor,
+    args,
+    fixed_location=False,
+):
+    fixed_location = args["fixed_location"]
+    adv_scene, car_scene, scene_obj_mask, scene_paint_mask = build_attack_scene(
+        input_img,
+        car_img,
+        scene_img,
+        paint_mask,
+        car_mask,
+        content_mask_tensor,
+        args,
+    )
+    mean_depth_diff = compute_detector_adv_loss(adv_scene, scene_obj_mask, scene_paint_mask, yolo_model, args)
+    adv_loss = compute_scene_adv_loss(adv_scene, scene_obj_mask, scene_paint_mask, args, mean_depth_diff)
     return adv_loss, mean_depth_diff, adv_scene
 
 
@@ -634,7 +652,7 @@ def direction_update(
             paint_mask_init += direct
 
 
-def select_training_scene(train_loader, train_loader_iter, scene_img_fixed, batch_size, random_scene, step):
+def select_training_scene(train_loader, train_loader_iter, fixed_scene_batch, batch_size, random_scene):
     if random_scene:
         try:
             scene_img_batch, _ = next(train_loader_iter)
@@ -644,18 +662,8 @@ def select_training_scene(train_loader, train_loader_iter, scene_img_fixed, batc
             train_loader_iter = iter(train_loader)
             scene_img_batch, _ = next(train_loader_iter)
         scene_img = scene_img_batch.to(config.device0)
-        return scene_img, scene_img_fixed, train_loader_iter
-
-    if step == 0:
-        try:
-            scene_img_batch, _ = next(train_loader_iter)
-            if scene_img_batch.size()[0] != batch_size:
-                raise StopIteration
-        except StopIteration:
-            train_loader_iter = iter(train_loader)
-            scene_img_batch, _ = next(train_loader_iter)
-        scene_img_fixed = scene_img_batch.to(config.device0)
-    return scene_img_fixed, scene_img_fixed, train_loader_iter
+        return scene_img, train_loader_iter
+    return fixed_scene_batch, train_loader_iter
 
 
 def compute_perceptual_scores(model, style_losses, content_losses, tv_losses, input_img, style_weight, content_weight, tv_weight, skip_perceptual):
@@ -1103,6 +1111,11 @@ def run_style_transfer(
     train_loader = DataLoader(kitti_loader_train, batch_size=args["batch_size"], shuffle=True, num_workers=3, pin_memory=True)
     scene_data_len = len(train_loader)
     train_loader_iter = iter(train_loader)
+    fixed_scene_batch = None
+
+    if not args["random_scene"]:
+        fixed_scene_img, _ = kitti_loader_train[0]
+        fixed_scene_batch = fixed_scene_img.unsqueeze(0).repeat(args["batch_size"], 1, 1, 1).to(config.device0)
 
     # if args["random_scene"]:
     #     print("Using random scene... Scene dataset size: ", scene_data_len)
@@ -1181,7 +1194,6 @@ def run_style_transfer(
 
     mask_loss = torch.zeros(1)
 
-    scene_img_fixed = None
     Cam = CAM()
 
     color_scheme = determine_color_scheme(content_white_mask, content_red_mask, content_black_mask, content_yellow_mask)
@@ -1203,7 +1215,6 @@ def run_style_transfer(
             nonlocal paint_mask_init
             nonlocal mask_loss
             nonlocal run_mask_optimize
-            nonlocal scene_img_fixed
             nonlocal yolo_result
             nonlocal adv_scene_result
             nonlocal Cam
@@ -1230,13 +1241,12 @@ def run_style_transfer(
             )
 
             # 为当前优化步选择训练场景 batch。
-            scene_img, scene_img_fixed, train_loader_iter = select_training_scene(
+            scene_img, train_loader_iter = select_training_scene(
                 train_loader,
                 train_loader_iter,
-                scene_img_fixed,
+                fixed_scene_batch,
                 args["batch_size"],
                 args["random_scene"],
-                run[0],
             )
 
             # 计算对抗目标；如果开启 EOT，则在这里走 EOT 分支。
