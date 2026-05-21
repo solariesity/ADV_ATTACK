@@ -33,7 +33,7 @@ SCENE_CAR_MODE=1
 STYLE_WEIGHT=0
 MASK_WEIGHT=0
 COLOR_WEIGHT=0
-DEVICE=0
+DEVICE=1
 TARGET_IDX=""
 
 CW14=5
@@ -45,8 +45,8 @@ REALISTIC_SWEEP=(
 )
 
 CONTENT_TAG="${CONTENT_IMAGE%.*}"
-EXPERIMENT_TAG="2_hq_cw14_5_cw2356_5_rw_0.0005_steps605_cw_0_ow_0_midu50_adam"
-LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0520/${EXPERIMENT_TAG}/${CONTENT_TAG}_pm${PAINT_MASK}"
+EXPERIMENT_TAG="0_hq_cw14_5_cw2356_5_rw_0.0005_steps605_cw_0_ow_0_midu50_adam"
+LOG_DIR="/home/hyj/code/ADV_ATTACK/DeepPhotoStyle_pytorch/log/log2026/05/log0521/${EXPERIMENT_TAG}/${CONTENT_TAG}_pm${PAINT_MASK}"
 LOG_FILE="$LOG_DIR/color_scan_${PAINT_MASK}_${STEPS}.txt"
 
 mkdir -p "$LOG_DIR"

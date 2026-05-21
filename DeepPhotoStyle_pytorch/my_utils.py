@@ -191,8 +191,8 @@ def compute_lap(path_img):
     const_size = np.zeros(shape=(h, w))
     M = compute_laplacian(image)
     M = M.tocoo().astype(np.float32)
-    indices = torch.from_numpy(np.vstack((M.row, M.col))).long().cuda()
-    values = torch.from_numpy(M.data).cuda()
+    indices = torch.from_numpy(np.vstack((M.row, M.col))).long().to(config.device0)
+    values = torch.from_numpy(M.data).to(config.device0)
     shape = torch.Size(M.shape)
     Ms = torch.sparse_coo_tensor(indices, values, shape, device=config.device0)
     return Ms

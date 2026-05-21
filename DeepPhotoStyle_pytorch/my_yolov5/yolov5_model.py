@@ -23,11 +23,6 @@ except ImportError:
     from yolov5_show import *
     from yolov5_diff import *
 
-
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # 自动选择GPU或CPU
-device = config.device0
-
-
 def import_yolov5s_model_1(device_num=0, scene_size=None, model_type="yolov5s"):
     """
     导入YOLOv5模型（带简单重试机制）
@@ -76,6 +71,7 @@ def import_yolov5s_model_2(device_num=0, scene_size=None, model_type="yolov5s"):
     检测张量用
     只尝试从本地加载模型，失败后自动重试最多10次
     """
+    device = config.device0
     saved_model_path = f"../models/yolov5s_2_{device_num}.pth"
 
     if os.path.exists(saved_model_path):

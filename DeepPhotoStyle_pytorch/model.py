@@ -506,9 +506,7 @@ def select_scene_car_box(detections, car_mask, scene_height, scene_width):
 
         center_x = (x1 + x2) / 2.0
         center_y = (y1 + y2) / 2.0
-        center_distance = np.sqrt(
-            ((center_x - scene_center_x) / max(scene_width, 1)) ** 2 + ((center_y - scene_center_y) / max(scene_height, 1)) ** 2
-        )
+        center_distance = np.sqrt(((center_x - scene_center_x) / max(scene_width, 1)) ** 2 + ((center_y - scene_center_y) / max(scene_height, 1)) ** 2)
 
         score = conf - 0.3 * aspect_penalty - 0.15 * center_distance
         if best_score is None or score > best_score:
@@ -527,10 +525,50 @@ def get_cached_scene_car_boxes(scene_img, args):
     return [box.to(scene_img.device) for box in cached_boxes]
 
 
+def get_cached_scene_car_layouts(scene_img, args):
+    cache = args.setdefault("_scene_car_cache", {})
+    cached_shape = cache.get("scene_shape")
+    cached_layouts = cache.get("layouts")
+    if cached_shape != tuple(scene_img.shape) or cached_layouts is None:
+        return None
+    return cached_layouts
+
+
 def update_scene_car_box_cache(scene_img, selected_boxes, args):
     cache = args.setdefault("_scene_car_cache", {})
     cache["scene_shape"] = tuple(scene_img.shape)
     cache["selected_boxes"] = [box.detach().clone().cpu() for box in selected_boxes]
+
+
+def update_scene_car_layout_cache(scene_img, layouts, args):
+    cache = args.setdefault("_scene_car_cache", {})
+    cache["scene_shape"] = tuple(scene_img.shape)
+    cache["layouts"] = layouts
+
+
+def build_scene_car_layouts(selected_boxes, scene_height, scene_width):
+    layouts = []
+    for selected_box in selected_boxes:
+        x1, y1, x2, y2 = [int(round(value)) for value in selected_box[:4].tolist()]
+        x1 = max(0, min(x1, scene_width - 1))
+        y1 = max(0, min(y1, scene_height - 1))
+        x2 = max(x1 + 1, min(x2, scene_width))
+        y2 = max(y1 + 1, min(y2, scene_height))
+        layouts.append(
+            {
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+                "target_width": x2 - x1,
+                "target_height": y2 - y1,
+                "pad_left": x1,
+                "pad_right": scene_width - x2,
+                "pad_top": y1,
+                "pad_bottom": scene_height - y2,
+            }
+        )
+    return layouts
 
 
 def build_scene_car_attack(scene_img, adv_car_image, paint_mask, car_mask, yolo_model, args):
@@ -546,6 +584,11 @@ def build_scene_car_attack(scene_img, adv_car_image, paint_mask, car_mask, yolo_
             return None
         update_scene_car_box_cache(scene_img, selected_boxes, args)
 
+    cached_layouts = get_cached_scene_car_layouts(scene_img, args)
+    if cached_layouts is None:
+        cached_layouts = build_scene_car_layouts(selected_boxes, scene_height, scene_width)
+        update_scene_car_layout_cache(scene_img, cached_layouts, args)
+
     car_scene = scene_img.clone()
 
     paint_mask_3d = normalize_spatial_mask(paint_mask).to(scene_img.device)
@@ -559,15 +602,9 @@ def build_scene_car_attack(scene_img, adv_car_image, paint_mask, car_mask, yolo_
     scene_obj_mask_list = []
     scene_paint_mask_list = []
 
-    for image_idx, selected_box in enumerate(selected_boxes):
-        x1, y1, x2, y2 = [int(round(value)) for value in selected_box[:4].tolist()]
-        x1 = max(0, min(x1, scene_width - 1))
-        y1 = max(0, min(y1, scene_height - 1))
-        x2 = max(x1 + 1, min(x2, scene_width))
-        y2 = max(y1 + 1, min(y2, scene_height))
-
-        target_height = y2 - y1
-        target_width = x2 - x1
+    for image_idx, layout in enumerate(cached_layouts):
+        target_height = layout["target_height"]
+        target_width = layout["target_width"]
 
         resized_patch_content = F.interpolate(
             patch_content.unsqueeze(0),
@@ -575,36 +612,35 @@ def build_scene_car_attack(scene_img, adv_car_image, paint_mask, car_mask, yolo_
             mode="bilinear",
             align_corners=False,
         ).squeeze(0)
-        resized_patch_mask = F.interpolate(
-            effective_paint_mask.unsqueeze(0),
-            size=(target_height, target_width),
-            mode="bilinear",
-            align_corners=False,
-        ).squeeze(0).clamp(0, 1)
+        resized_patch_mask = (
+            F.interpolate(
+                effective_paint_mask.unsqueeze(0),
+                size=(target_height, target_width),
+                mode="bilinear",
+                align_corners=False,
+            )
+            .squeeze(0)
+            .clamp(0, 1)
+        )
         resized_patch_mask_rgb = resized_patch_mask.expand(channel_count, -1, -1)
         resized_patch_region = resized_patch_content * resized_patch_mask_rgb
 
-        pad_left = x1
-        pad_right = scene_width - x2
-        pad_top = y1
-        pad_bottom = scene_height - y2
-
         patch_canvas = F.pad(
             resized_patch_region,
-            (pad_left, pad_right, pad_top, pad_bottom),
+            (layout["pad_left"], layout["pad_right"], layout["pad_top"], layout["pad_bottom"]),
             mode="constant",
             value=0.0,
         )
         patch_mask_canvas = F.pad(
             resized_patch_mask_rgb,
-            (pad_left, pad_right, pad_top, pad_bottom),
+            (layout["pad_left"], layout["pad_right"], layout["pad_top"], layout["pad_bottom"]),
             mode="constant",
             value=0.0,
         )
         obj_mask_patch = torch.ones((1, target_height, target_width), device=scene_img.device, dtype=scene_img.dtype)
         obj_mask_canvas = F.pad(
             obj_mask_patch.expand(channel_count, -1, -1),
-            (pad_left, pad_right, pad_top, pad_bottom),
+            (layout["pad_left"], layout["pad_right"], layout["pad_top"], layout["pad_bottom"]),
             mode="constant",
             value=0.0,
         )
@@ -862,7 +898,7 @@ def direction_update(
 
 
 def load_fixed_vehicle_scene_batch(batch_size):
-    scene_path = os.path.join(utils.vehicle_scene_path, "light_close_to_far_frame_000272.png")
+    scene_path = os.path.join(utils.vehicle_scene_path, "light_close_to_far_frame_000145.png")
     scene_img = pil.open(scene_path).convert("RGB")
     original_w, original_h = scene_img.size
     new_w, new_h = scene_size

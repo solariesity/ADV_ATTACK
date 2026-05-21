@@ -238,6 +238,7 @@ if __name__ == "__main__":
         args,
     )
     yolo_result.save(os.path.join(log_dir, "yolo_result.jpg"))
+    utils.save_pic(adv_scene_ret[[0]], "yolo_result_clean", log_dir=log_dir)
     print("Style transfer completed")
 
     # utils.save_pic(output, "deep_style_tranfer")
