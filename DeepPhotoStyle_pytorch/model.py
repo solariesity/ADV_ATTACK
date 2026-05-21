@@ -418,8 +418,215 @@ def attach_adv_car_to_scene_for_training(scene_img, adv_car_image, car_img, car_
     return adv_scene, car_scene, scene_obj_mask, scene_paint_mask
 
 
-def build_attack_scene(input_img, car_img, scene_img, paint_mask, car_mask, content_mask_tensor, args):
+def normalize_spatial_mask(mask):
+    if mask.dim() == 4:
+        mask = mask[0]
+    if mask.dim() == 2:
+        mask = mask.unsqueeze(0)
+    return mask.float()
+
+
+def get_mask_bbox(mask):
+    mask_3d = normalize_spatial_mask(mask)
+    mask_2d = mask_3d.sum(dim=0) > 0
+    ys, xs = torch.nonzero(mask_2d, as_tuple=True)
+    if ys.numel() == 0 or xs.numel() == 0:
+        _, height, width = mask_3d.shape
+        return 0, 0, width, height
+    x1 = int(xs.min().item())
+    y1 = int(ys.min().item())
+    x2 = int(xs.max().item()) + 1
+    y2 = int(ys.max().item()) + 1
+    return x1, y1, x2, y2
+
+
+def detect_scene_objects(scene_img, yolo_model, args):
+    use_official_yolo_tensor = bool(args.get("official_yolo_tensor", 0))
+    if use_official_yolo_tensor:
+        _, detections_list, _ = detect_tensor_with_official_yolo(
+            yolo_model,
+            scene_img,
+            image_size=(640, 640),
+            conf_threshold=float(getattr(yolo_model, "conf", 0.1)),
+            iou_threshold=float(getattr(yolo_model, "iou", 0.45)),
+            max_det=int(getattr(yolo_model, "max_det", 300)),
+        )
+        return [detections.to(scene_img.device) for detections in detections_list]
+
+    detections_list = []
+    with torch.no_grad():
+        for image_idx in range(scene_img.size(0)):
+            single_scene = scene_img[image_idx : image_idx + 1]
+            model_output = yolo_model(single_scene)
+            final_boxes, final_scores, final_class_ids, _ = yolo_result_nms(
+                model_output,
+                single_scene,
+                conf_threshold=float(getattr(yolo_model, "conf", 0.25)),
+                iou_threshold=float(getattr(yolo_model, "iou", 0.45)),
+                class_names=getattr(yolo_model, "names", None),
+            )
+            if len(final_boxes) == 0:
+                detections = torch.zeros((0, 6), device=scene_img.device, dtype=scene_img.dtype)
+            else:
+                detections = torch.cat(
+                    [
+                        final_boxes.to(scene_img.device).float(),
+                        final_scores.unsqueeze(1).to(scene_img.device).float(),
+                        final_class_ids.unsqueeze(1).to(scene_img.device).float(),
+                    ],
+                    dim=1,
+                )
+            detections_list.append(detections)
+    return detections_list
+
+
+def select_scene_car_box(detections, car_mask, scene_height, scene_width):
+    if detections is None or len(detections) == 0:
+        return None
+
+    ref_x1, ref_y1, ref_x2, ref_y2 = get_mask_bbox(car_mask)
+    ref_width = max(ref_x2 - ref_x1, 1)
+    ref_height = max(ref_y2 - ref_y1, 1)
+    ref_aspect = ref_width / ref_height
+
+    car_detections = detections[torch.round(detections[:, 5]).long() == 2]
+    candidate_detections = car_detections if len(car_detections) > 0 else detections
+
+    scene_center_x = scene_width / 2.0
+    scene_center_y = scene_height / 2.0
+    best_detection = None
+    best_score = None
+
+    for detection in candidate_detections:
+        x1, y1, x2, y2, conf, _ = detection.tolist()
+        det_width = max(x2 - x1, 1.0)
+        det_height = max(y2 - y1, 1.0)
+        det_aspect = det_width / det_height
+        aspect_penalty = abs(np.log((det_aspect + 1e-6) / (ref_aspect + 1e-6)))
+
+        center_x = (x1 + x2) / 2.0
+        center_y = (y1 + y2) / 2.0
+        center_distance = np.sqrt(
+            ((center_x - scene_center_x) / max(scene_width, 1)) ** 2 + ((center_y - scene_center_y) / max(scene_height, 1)) ** 2
+        )
+
+        score = conf - 0.3 * aspect_penalty - 0.15 * center_distance
+        if best_score is None or score > best_score:
+            best_score = score
+            best_detection = detection
+
+    return best_detection
+
+
+def get_cached_scene_car_boxes(scene_img, args):
+    cache = args.setdefault("_scene_car_cache", {})
+    cached_shape = cache.get("scene_shape")
+    cached_boxes = cache.get("selected_boxes")
+    if cached_shape != tuple(scene_img.shape) or cached_boxes is None:
+        return None
+    return [box.to(scene_img.device) for box in cached_boxes]
+
+
+def update_scene_car_box_cache(scene_img, selected_boxes, args):
+    cache = args.setdefault("_scene_car_cache", {})
+    cache["scene_shape"] = tuple(scene_img.shape)
+    cache["selected_boxes"] = [box.detach().clone().cpu() for box in selected_boxes]
+
+
+def build_scene_car_attack(scene_img, adv_car_image, paint_mask, car_mask, yolo_model, args):
+    _, channel_count, scene_height, scene_width = scene_img.size()
+    selected_boxes = get_cached_scene_car_boxes(scene_img, args)
+    if selected_boxes is None:
+        detections_list = detect_scene_objects(scene_img, yolo_model, args)
+        selected_boxes = []
+        for detections in detections_list:
+            selected_boxes.append(select_scene_car_box(detections, car_mask, scene_height, scene_width))
+
+        if any(selected_box is None for selected_box in selected_boxes):
+            return None
+        update_scene_car_box_cache(scene_img, selected_boxes, args)
+
+    car_scene = scene_img.clone()
+
+    paint_mask_3d = normalize_spatial_mask(paint_mask).to(scene_img.device)
+    car_mask_3d = normalize_spatial_mask(car_mask).to(scene_img.device)
+    effective_paint_mask = (paint_mask_3d * car_mask_3d).clamp(0, 1)
+    if torch.max(effective_paint_mask) <= 0:
+        effective_paint_mask = paint_mask_3d.clamp(0, 1)
+
+    patch_content = adv_car_image[0]
+    adv_scene_list = []
+    scene_obj_mask_list = []
+    scene_paint_mask_list = []
+
+    for image_idx, selected_box in enumerate(selected_boxes):
+        x1, y1, x2, y2 = [int(round(value)) for value in selected_box[:4].tolist()]
+        x1 = max(0, min(x1, scene_width - 1))
+        y1 = max(0, min(y1, scene_height - 1))
+        x2 = max(x1 + 1, min(x2, scene_width))
+        y2 = max(y1 + 1, min(y2, scene_height))
+
+        target_height = y2 - y1
+        target_width = x2 - x1
+
+        resized_patch_content = F.interpolate(
+            patch_content.unsqueeze(0),
+            size=(target_height, target_width),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0)
+        resized_patch_mask = F.interpolate(
+            effective_paint_mask.unsqueeze(0),
+            size=(target_height, target_width),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0).clamp(0, 1)
+        resized_patch_mask_rgb = resized_patch_mask.expand(channel_count, -1, -1)
+        resized_patch_region = resized_patch_content * resized_patch_mask_rgb
+
+        pad_left = x1
+        pad_right = scene_width - x2
+        pad_top = y1
+        pad_bottom = scene_height - y2
+
+        patch_canvas = F.pad(
+            resized_patch_region,
+            (pad_left, pad_right, pad_top, pad_bottom),
+            mode="constant",
+            value=0.0,
+        )
+        patch_mask_canvas = F.pad(
+            resized_patch_mask_rgb,
+            (pad_left, pad_right, pad_top, pad_bottom),
+            mode="constant",
+            value=0.0,
+        )
+        obj_mask_patch = torch.ones((1, target_height, target_width), device=scene_img.device, dtype=scene_img.dtype)
+        obj_mask_canvas = F.pad(
+            obj_mask_patch.expand(channel_count, -1, -1),
+            (pad_left, pad_right, pad_top, pad_bottom),
+            mode="constant",
+            value=0.0,
+        )
+
+        adv_scene_single = patch_canvas + scene_img[image_idx] * (1 - patch_mask_canvas)
+        adv_scene_list.append(adv_scene_single)
+        scene_obj_mask_list.append(obj_mask_canvas)
+        scene_paint_mask_list.append(patch_mask_canvas)
+
+    adv_scene = torch.stack(adv_scene_list, dim=0)
+    scene_obj_mask = torch.stack(scene_obj_mask_list, dim=0)
+    scene_paint_mask = torch.stack(scene_paint_mask_list, dim=0)
+    return adv_scene, car_scene, scene_obj_mask, scene_paint_mask
+
+
+def build_attack_scene(input_img, car_img, scene_img, paint_mask, car_mask, content_mask_tensor, yolo_model, args):
     adv_car_image = build_adv_car_image(input_img, car_img, paint_mask, content_mask_tensor, args)
+    if int(args.get("scene_car_mode", 0)) == 1:
+        scene_car_attack = build_scene_car_attack(scene_img, adv_car_image, paint_mask, car_mask, yolo_model, args)
+        if scene_car_attack is not None:
+            return scene_car_attack
+
     return attach_adv_car_to_scene_for_training(
         scene_img,
         adv_car_image,
@@ -481,6 +688,7 @@ def get_adv_loss(
     fixed_location=False,
 ):
     fixed_location = args["fixed_location"]
+    # 根据当前模式构建真正送入检测器的攻击场景
     adv_scene, car_scene, scene_obj_mask, scene_paint_mask = build_attack_scene(
         input_img,
         car_img,
@@ -488,6 +696,7 @@ def get_adv_loss(
         paint_mask,
         car_mask,
         content_mask_tensor,
+        yolo_model,
         args,
     )
     mean_depth_diff = compute_detector_adv_loss(adv_scene, scene_obj_mask, scene_paint_mask, yolo_model, args)
@@ -682,7 +891,7 @@ def select_training_scene(train_loader, train_loader_iter, fixed_scene_batch, ba
         except StopIteration:
             train_loader_iter = iter(train_loader)
             scene_img_batch, _ = next(train_loader_iter)
-            scene_img = scene_img_batch.to(config.device0)
+        scene_img = scene_img_batch.to(config.device0)
         return scene_img, train_loader_iter
     return fixed_scene_batch, train_loader_iter
 
@@ -831,15 +1040,16 @@ def log_training_visuals(
     num_steps,
     args,
 ):
-    adv_car_image = build_adv_car_image(input_img, car_img, paint_mask, content_mask, args)
-    adv_scene, car_scene, scene_obj_mask, scene_paint_mask = attach_adv_car_to_scene_for_training(
-        scene_img,
-        adv_car_image,
+    # 复用训练阶段的场景构建逻辑，保证日志图和真实优化输入一致
+    adv_scene, car_scene, scene_obj_mask, scene_paint_mask = build_attack_scene(
+        input_img,
         car_img,
-        car_mask,
+        scene_img,
         paint_mask,
+        car_mask,
+        content_mask,
+        yolo_model,
         args,
-        fixed_location=args["fixed_location"],
     )
 
     with torch.no_grad():
